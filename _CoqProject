@@ -6,3 +6,8 @@ theories/prelude.v
 theories/client_id.v
 theories/item.v
 theories/item_set.v
+theories/util.v
+theories/order/item_order.v
+theories/order/item_set_invariant.v
+theories/order/totality.v
+theories/order/transitivity.v

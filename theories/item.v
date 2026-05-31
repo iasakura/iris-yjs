@@ -44,6 +44,18 @@ Arguments Item {A} _ _ _ _.
 
 Coercion itemPtr : YjsItem >-> YjsPtr.
 
+(** Field accessors for [YjsItem]. Since [YjsItem] is defined mutually with
+    [YjsPtr] it is an inductive rather than a record, so we project by hand.
+    (The id accessor is [item_id] to avoid clashing with [Init]'s [id].) *)
+Definition origin {A} (i : YjsItem A) : YjsPtr A :=
+  match i with Item o _ _ _ => o end.
+Definition rightOrigin {A} (i : YjsItem A) : YjsPtr A :=
+  match i with Item _ r _ _ => r end.
+Definition item_id {A} (i : YjsItem A) : YjsId :=
+  match i with Item _ _ id _ => id end.
+Definition content {A} (i : YjsItem A) : A :=
+  match i with Item _ _ _ c => c end.
+
 (** Structural size, used as a termination measure for recursion over the
     item tree. *)
 Fixpoint YjsPtr_size {A} (p : YjsPtr A) : nat :=
