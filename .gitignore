@@ -22,3 +22,16 @@ _opam
 .DS_Store
 html/*
 .vscode/
+
+# Stray environment/editor files that leak into the working tree
+.amafa/
+.claude/
+.idea/
+.mcp.json
+.ripgreprc
+.gitconfig
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
