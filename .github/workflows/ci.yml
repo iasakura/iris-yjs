@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2.0"
+          opam-repositories: |
+            coq-released: https://coq.inria.fr/opam/released
+            default: https://opam.ocaml.org
+
+      - name: Install dependencies
+        run: opam install . --deps-only --yes
+
+      - name: Build
+        run: opam exec -- make -j"$(nproc)"
