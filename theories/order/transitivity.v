@@ -110,3 +110,184 @@ Proof.
     apply: (ConflictLt'_ltOriginSame _ xr zr xid zid xc zc);
       [ exact: Hxzr | exact: Hzxr | exact: (YjsId_lt_trans _ _ _ HID HJD) ].
 Qed.
+
+(** Main transitivity, by strong induction on the size sum. *)
+Lemma yjs_lt_trans {A} {P : ItemSet A} (inv : ItemSetInvariant P) :
+  IsClosedItemSet P ->
+  forall (x y z : YjsPtr A), P x -> P y -> P z ->
+  YjsLt' x y -> YjsLt' y z -> YjsLt' x z.
+Proof.
+  move=> Hclosed.
+  suff H : forall ts (x y z : YjsPtr A), P x -> P y -> P z ->
+    forall h0, YjsLt h0 x y -> forall h1, YjsLt h1 y z ->
+    YjsPtr_size x + YjsPtr_size y + YjsPtr_size z = ts -> YjsLt' x z.
+  { move=> x y z Hpx Hpy Hpz [h0 Hxy] [h1 Hyz].
+    exact: (H _ x y z Hpx Hpy Hpz h0 Hxy h1 Hyz eq_refl). }
+  apply: (nat_strong_ind (fun ts => forall (x y z : YjsPtr A), P x -> P y -> P z ->
+    forall h0, YjsLt h0 x y -> forall h1, YjsLt h1 y z ->
+    YjsPtr_size x + YjsPtr_size y + YjsPtr_size z = ts -> YjsLt' x z)).
+  move=> ts ih x y z Hpx Hpy Hpz h0 Hxy h1 Hyz Hts; subst ts.
+  (* corner cases coming from [x] / [y] in [Hxy] *)
+  case: (yjs_lt_cases _ _ _ Hxy) => [[Hxf Hy] | [[Hyl _] | Hxycases]].
+  { (* x = First *)
+    subst x; case: Hy => [Hyl | [yi Hyi]].
+    - (* y = Last : contradicts Last < z *)
+      subst y; exfalso; exact: (not_last_lt_ptr Hclosed inv h1 z Hpz Hyz).
+    - (* y = itemPtr : compare First with z *)
+      subst y; destruct z as [zi | | ].
+      + apply: YjsLt'_ltOriginOrder; exact: lt_first.
+      + by exfalso; exact: (not_ptr_lt_first Hclosed inv h1 _ Hpy Hyz).
+      + apply: YjsLt'_ltOriginOrder; exact: lt_first_last. }
+  { (* y = Last : contradicts Last < z *)
+    subst y; exfalso; exact: (not_last_lt_ptr Hclosed inv h1 z Hpz Hyz). }
+  (* corner cases coming from [y] / [z] in [Hyz] *)
+  case: (yjs_lt_cases _ _ _ Hyz) => [[Hyf _] | [[Hzl Hz] | Hyzcases]].
+  { (* y = First : contradicts x < First *)
+    subst y; exfalso; exact: (not_ptr_lt_first Hclosed inv h0 x Hpx Hxy). }
+  { (* z = Last *)
+    subst z; case: Hz => [Hyf | [yi Hyi]].
+    - (* y = First : contradicts x < First *)
+      subst y; exfalso; exact: (not_ptr_lt_first Hclosed inv h0 x Hpx Hxy).
+    - (* y = itemPtr : compare x with Last *)
+      subst y; destruct x as [xi | | ].
+      + apply: YjsLt'_ltOriginOrder; exact: lt_last.
+      + apply: YjsLt'_ltOriginOrder; exact: lt_first_last.
+      + by exfalso; exact: (not_last_lt_ptr Hclosed inv h0 _ Hpy Hxy). }
+  (* main cases *)
+  case: Hxycases => [[[xo xr xid xc] [Hxeq Hle]] | [[[yo yr yid yc] [Hyeq Hle]] | Hxyconf]].
+  - (* C: x = Item .., rightOrigin x = xr <= y *)
+    subst x; simpl in Hle.
+    apply: YjsLt'_ltRightOrigin.
+    case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle) => [Heq | Hxry].
+    + (* xr = y *) subst y; apply: YjsLeq'_leqLt; by exists h1.
+    + (* xr < y *) apply: YjsLeq'_leqLt; case: Hxry => [hr Hxry'].
+      apply: (ih _ _ xr y z (closedRight _ Hclosed xo xr xid xc Hpx) Hpy Hpz
+                hr Hxry' h1 Hyz eq_refl); simpl; lia.
+  - (* D: y = Item .., x <= origin y = yo *)
+    subst y; simpl in Hle.
+    have Hpyo : P yo by exact: (closedLeft _ Hclosed yo yr yid yc Hpy).
+    have Hpyr : P yr by exact: (closedRight _ Hclosed yo yr yid yc Hpy).
+    case: Hyzcases => [[[yo' yr' yid' yc'] [Hyeq Hle']]
+                      | [[[zo zr zid zc] [Hzeq Hle']] | Hyzconf]].
+    + (* C': y = Item .., rightOrigin y = yr <= z *)
+      injection Hyeq as Eo Er Eid Ec; subst yo' yr' yid' yc'; simpl in Hle'.
+      have [hor Horlt] : YjsLt' yo yr by exact: (origin_not_leq _ inv yo yr yc yid Hpy).
+      case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle) => [Hxo | Hxlt];
+        case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle') => [Hrz | Hrlt].
+      * (* x = yo, yr = z : x < z is yo < yr *)
+        subst x z; by exists hor.
+      * (* x = yo, yr < z : yo < yr < z *)
+        subst x; case: Hrlt => [hrz Hrlt'].
+        apply: (ih _ _ yo yr z Hpyo Hpyr Hpz hor Horlt hrz Hrlt' eq_refl);
+          simpl; lia.
+      * (* x < yo, yr = z : x < yo < yr = z *)
+        subst z; case: Hxlt => [hxo Hxlt'].
+        apply: (ih _ _ x yo yr Hpx Hpyo Hpyr hxo Hxlt' hor Horlt eq_refl);
+          simpl; lia.
+      * (* x < yo, yr < z : x < yo < z via (yo < yr < z) *)
+        case: Hxlt => [hxo Hxlt']; case: Hrlt => [hrz Hrlt'].
+        have [hoz Hoz] : YjsLt' yo z.
+        { apply: (ih _ _ yo yr z Hpyo Hpyr Hpz hor Horlt hrz Hrlt' eq_refl);
+            simpl; lia. }
+        apply: (ih _ _ x yo z Hpx Hpyo Hpz hxo Hxlt' hoz Hoz eq_refl);
+          simpl; lia.
+    + (* D': z = Item .., y <= origin z = zo *)
+      subst z; simpl in Hle'.
+      have Hpzo : P zo by exact: (closedLeft _ Hclosed zo zr zid zc Hpz).
+      apply: YjsLt'_ltOrigin.
+      case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle') => [Heq | Hyzo].
+      * (* y = zo *) subst zo; apply: YjsLeq'_leqLt; by exists h0.
+      * (* y < zo *) apply: YjsLeq'_leqLt; case: Hyzo => [hyz' Hyzo'].
+        apply: (ih _ _ x (Item yo yr yid yc) zo Hpx Hpy Hpzo h0 Hxy hyz' Hyzo' eq_refl);
+          simpl; lia.
+    + (* E': ConflictLt' y z *)
+      case: Hyzconf => [hc Hyzconf].
+      have [ho Hyoz] : YjsLt' yo z
+        by exact: (conflict_lt_x_origin_lt_y _ _ _ Hclosed Hyzconf).
+      case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle) => [Heq | Hxlt].
+      * (* x = yo *) subst x; by exists ho.
+      * (* x < yo *) case: Hxlt => [hxo Hxlt'].
+        apply: (ih _ _ x yo z Hpx Hpyo Hpz hxo Hxlt' ho Hyoz eq_refl);
+          simpl; lia.
+  - (* E: ConflictLt' x y *)
+    case: Hxyconf => [hc Hxyconf].
+    case: Hyzcases => [[[yo' yr' yid' yc'] [Hyeq Hle']]
+                      | [[[zo zr zid zc] [Hzeq Hle']] | Hyzconf]].
+    + (* C': y = Item .., rightOrigin y <= z *)
+      subst y; simpl in Hle'.
+      have [hxr Hxr] : YjsLt' x yr' by exact: (conflict_lt_x_lt_y_right_origin _ _ _ Hxyconf).
+      case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle') => [Heq | Hrz].
+      * (* yr' = z *) subst z; by exists hxr.
+      * (* yr' < z *) case: Hrz => [hrz Hrz'].
+        apply: (ih _ _ x yr' z Hpx (closedRight _ Hclosed yo' yr' yid' yc' Hpy) Hpz
+                  hxr Hxr hrz Hrz' eq_refl); simpl; lia.
+    + (* D': z = Item .., y <= origin z *)
+      subst z; simpl in Hle'.
+      have Hpzo : P zo by exact: (closedLeft _ Hclosed zo zr zid zc Hpz).
+      apply: YjsLt'_ltOrigin.
+      case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle') => [Heq | Hyzo].
+      * (* y = zo *) subst zo; apply: YjsLeq'_leqLt; by exists h0.
+      * (* y < zo *) apply: YjsLeq'_leqLt; case: Hyzo => [hyz' Hyzo'].
+        apply: (ih _ _ x y zo Hpx Hpy Hpzo h0 Hxy hyz' Hyzo' eq_refl);
+          simpl; lia.
+    + (* E': ConflictLt' y z : both conflicts, use conflict_lt_trans *)
+      case: Hyzconf => [hc' Hyzconf].
+      exact: (conflict_lt_trans inv Hclosed x y z Hpx Hpy Hpz ih hc hc' Hxyconf Hyzconf).
+Qed.
+
+(** Mixed transitivity corollaries combining [YjsLeq'] and [YjsLt']. *)
+Lemma yjs_leq'_p_trans1 {A} {P : ItemSet A} (inv : ItemSetInvariant P) (x y z : YjsPtr A) :
+  P x -> P y -> P z -> IsClosedItemSet P ->
+  YjsLeq' x y -> YjsLt' y z -> YjsLt' x z.
+Proof.
+  move=> Hpx Hpy Hpz Hclosed Hleq Hlt.
+  case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hleq) => [Heq | Hxy].
+  - by subst x.
+  - exact: (yjs_lt_trans inv Hclosed x y z Hpx Hpy Hpz Hxy Hlt).
+Qed.
+
+Lemma yjs_leq'_p_trans2 {A} {P : ItemSet A} (inv : ItemSetInvariant P) (x y z : YjsPtr A) :
+  P x -> P y -> P z -> IsClosedItemSet P ->
+  YjsLt' x y -> YjsLeq' y z -> YjsLt' x z.
+Proof.
+  move=> Hpx Hpy Hpz Hclosed Hlt Hleq.
+  case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hleq) => [Heq | Hyz].
+  - by subst z.
+  - exact: (yjs_lt_trans inv Hclosed x y z Hpx Hpy Hpz Hlt Hyz).
+Qed.
+
+Lemma yjs_leq'_p_trans {A} {P : ItemSet A} (inv : ItemSetInvariant P) (x y z : YjsPtr A) :
+  P x -> P y -> P z -> IsClosedItemSet P ->
+  YjsLeq' x y -> YjsLeq' y z -> YjsLeq' x z.
+Proof.
+  move=> Hpx Hpy Hpz Hclosed Hleq1 Hleq2.
+  case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hleq1) => [Heq | Hxy].
+  - by subst x.
+  - case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hleq2) => [Heq | Hyz].
+    + subst z; exact: (YjsLeq'_leqLt _ _ Hxy).
+    + apply: YjsLeq'_leqLt; exact: (yjs_lt_trans inv Hclosed x y z Hpx Hpy Hpz Hxy Hyz).
+Qed.
+
+Lemma yjs_leq_p_trans1 {A} {P : ItemSet A} (inv : ItemSetInvariant P) (x y z : YjsPtr A) h1 h2 :
+  P x -> P y -> P z -> IsClosedItemSet P ->
+  YjsLeq h1 x y -> YjsLt h2 y z -> exists h, YjsLt h x z.
+Proof.
+  move=> Hpx Hpy Hpz Hclosed Hleq Hlt.
+  exact: (yjs_leq'_p_trans1 inv x y z Hpx Hpy Hpz Hclosed (ex_intro _ h1 Hleq) (ex_intro _ h2 Hlt)).
+Qed.
+
+Lemma yjs_leq_p_trans2 {A} {P : ItemSet A} (inv : ItemSetInvariant P) (x y z : YjsPtr A) h1 h2 :
+  P x -> P y -> P z -> IsClosedItemSet P ->
+  YjsLt h1 x y -> YjsLeq h2 y z -> exists h, YjsLt h x z.
+Proof.
+  move=> Hpx Hpy Hpz Hclosed Hlt Hleq.
+  exact: (yjs_leq'_p_trans2 inv x y z Hpx Hpy Hpz Hclosed (ex_intro _ h1 Hlt) (ex_intro _ h2 Hleq)).
+Qed.
+
+Lemma yjs_leq_p_trans {A} {P : ItemSet A} (inv : ItemSetInvariant P) (x y z : YjsPtr A) h1 h2 :
+  P x -> P y -> P z -> IsClosedItemSet P ->
+  YjsLeq h1 x y -> YjsLeq h2 y z -> exists h, YjsLeq h x z.
+Proof.
+  move=> Hpx Hpy Hpz Hclosed Hleq1 Hleq2.
+  exact: (yjs_leq'_p_trans inv x y z Hpx Hpy Hpz Hclosed (ex_intro _ h1 Hleq1) (ex_intro _ h2 Hleq2)).
+Qed.
