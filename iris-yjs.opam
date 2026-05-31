@@ -1,0 +1,16 @@
+opam-version: "2.0"
+name: "iris-yjs"
+synopsis: "Verification of the Yjs CRDT core algorithm in Iris/HeapLang"
+maintainer: "iasakura <i.asakura58@gmail.com>"
+authors: "iasakura <i.asakura58@gmail.com>"
+license: "MIT"
+homepage: "https://github.com/iasakura/iris-yjs"
+dev-repo: "git+https://github.com:iasakura/iris-yjs.git"
+bug-reports: "https://github.com/iasakura/iris-yjs/issues"
+build: [make "-j%{jobs}%"]
+install: []
+depends: [
+  "rocq-core" { (= "9.2.0") }
+  "rocq-iris" { (= "4.5.0") }
+  "rocq-iris-heap-lang" { (= "4.5.0") }
+]
