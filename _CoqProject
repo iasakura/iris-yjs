@@ -3,3 +3,6 @@
 -arg -async-proofs-cache -arg force
 
 theories/prelude.v
+theories/client_id.v
+theories/item.v
+theories/item_set.v
