@@ -122,6 +122,37 @@ Proof.
   - move=> [m' [HR [m [HS HT]]]]; exists m; split; [by exists m' | done].
 Qed.
 
+(** Applying a list of operations in order, on top of a continuation [K]. *)
+Definition apply_ops (K : St -> St -> Prop) (ops : list A) : St -> St -> Prop :=
+  foldr eff_comp K (map effect ops).
+
+Lemma apply_ops_cons K a ops :
+  apply_ops K (a :: ops) = (effect a) ▷ (apply_ops K ops).
+Proof. done. Qed.
+
+(** [s] is a state reachable by running some causally-consistent set of
+    operations strictly below [a] (and not above any of them). *)
+Definition compatibleOp (hb : CausalOrder) (s : St) (a : A) : Prop :=
+  exists ops, hb_consistent hb ops
+    /\ (forall b, co_lt hb b a -> b ∈ ops)
+    /\ (forall b, b ∈ ops -> ¬ co_le hb a b)
+    /\ apply_ops (=) ops (op_init O) s.
+
+(** Concurrent operations of [l] commute, on every state they are both
+    compatible with. *)
+Definition concurrent_commutative (hb : CausalOrder) (l : list A) : Prop :=
+  forall a b, a ∈ l -> b ∈ l -> hb_concurrent hb a b ->
+    forall s, compatibleOp hb s a -> compatibleOp hb s b ->
+      forall s', ((effect a) ▷ (effect b)) s s' <-> ((effect b) ▷ (effect a)) s s'.
+
+(** A list of operations is applicable from [s], each step from a compatible
+    state. *)
+Inductive compatibleOps (hb : CausalOrder) : St -> list A -> Prop :=
+  | compatibleOps_nil s : compatibleOps hb s []
+  | compatibleOps_cons s s' a ops :
+      compatibleOp hb s a -> effect a s s' -> compatibleOps hb s' ops ->
+      compatibleOps hb s (a :: ops).
+
 End effects.
 
 End causal_order.
