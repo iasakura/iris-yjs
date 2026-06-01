@@ -115,11 +115,41 @@ Definition eff_equiv R S : Prop := forall s s', R s s' <-> S s s'.
 Local Infix "▷" := eff_comp (at level 60).
 Local Infix "≅" := eff_equiv (at level 70).
 
+Global Instance eff_equiv_equiv : Equivalence eff_equiv.
+Proof.
+  split; rewrite /eff_equiv.
+  - done.
+  - move=> R S H s s'; by rewrite H.
+  - move=> R S T H1 H2 s s'; by rewrite H1.
+Qed.
+
+Global Instance eff_comp_proper :
+  Proper (eff_equiv ==> eff_equiv ==> eff_equiv) eff_comp.
+Proof.
+  move=> R1 R2 HR S1 S2 HS s s''; rewrite /eff_comp.
+  split; move=> [m [H1 H2]]; exists m; split.
+  - by apply HR. - by apply HS. - by apply HR. - by apply HS.
+Qed.
+
 Lemma eff_comp_assoc R S T : ((R ▷ S) ▷ T) ≅ (R ▷ (S ▷ T)).
 Proof.
   move=> s s''; rewrite /eff_comp; split.
   - move=> [m [[m' [HR HS]] HT]]; exists m'; split; [done | by exists m].
   - move=> [m' [HR [m [HS HT]]]]; exists m; split; [by exists m' | done].
+Qed.
+
+Lemma eff_comp_id_r R : (R ▷ (=)) ≅ R.
+Proof.
+  move=> s s'; rewrite /eff_comp; split.
+  - move=> [m [HR Heq]]; by subst m.
+  - move=> HR; exists s'; by split.
+Qed.
+
+Lemma eff_comp_id_l R : ((=) ▷ R) ≅ R.
+Proof.
+  move=> s s'; rewrite /eff_comp; split.
+  - move=> [m [Heq HR]]; by subst m.
+  - move=> HR; exists s; by split.
 Qed.
 
 (** Applying a list of operations in order, on top of a continuation [K]. *)
