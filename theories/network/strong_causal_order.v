@@ -68,6 +68,15 @@ Lemma IdNoDup_app_l (W : WithId) (l1 l2 : list A) :
   IdNoDup W (l1 ++ l2) -> IdNoDup W l1.
 Proof. rewrite /IdNoDup fmap_app NoDup_app; tauto. Qed.
 
+Lemma IdNoDup_swap (W : WithId) (ops0 ops1 : list A) (a b : A) :
+  IdNoDup W (ops0 ++ a :: b :: ops1) -> IdNoDup W (ops0 ++ b :: a :: ops1).
+Proof.
+  rewrite /IdNoDup => H.
+  have Hperm : (ops0 ++ a :: b :: ops1) ≡ₚ (ops0 ++ b :: a :: ops1)
+    by apply: Permutation_app_head; apply: perm_swap.
+  by rewrite -Hperm.
+Qed.
+
 Lemma not_in_of_idnodup_snoc (W : WithId) (l : list A) (b : A) :
   IdNoDup W (l ++ [b]) -> b ∉ l.
 Proof.
@@ -134,6 +143,23 @@ Proof.
       apply (proj2 (IH m1)); exists m; split; [exact: Hxs | exact: Ha].
 Qed.
 
+Lemma effect_list_app l1 l2 s s' :
+  effect_list (l1 ++ l2) s s' <-> exists m, effect_list l1 s m /\ effect_list l2 m s'.
+Proof.
+  elim: l1 s => [| x xs IH] s.
+  - split.
+    + move=> Hl2; exists s; split; [by apply/effect_list_nil | exact: Hl2].
+    + by move=> [m [/effect_list_nil <- Hl2]].
+  - have -> : (x :: xs) ++ l2 = x :: (xs ++ l2) by [].
+    split.
+    + move=> [m1 [Hx Hrest]]; have [m [Hxs Hl2]] := proj1 (IH m1) Hrest.
+      exists m; split; last exact: Hl2.
+      exists m1; split; [exact: Hx | exact: Hxs].
+    + move=> [m [[m1 [Hx Hxs]] Hl2]].
+      exists m1; split; first exact: Hx.
+      apply (proj2 (IH m1)); exists m; split; [exact: Hxs | exact: Hl2].
+Qed.
+
 (** A validity discipline on states: a per-operation precondition
     [isValidState] and a global invariant [StateInv] preserved by valid steps. *)
 Record OperationValidity := {
@@ -167,6 +193,19 @@ Definition concurrent_commutative (OV : OperationValidity) (hb : @CausalOrder A)
     eff_comp O (effect O a) (effect O b) s s' ->
     eff_comp O (effect O b) (effect O a) s s'.
 
+(** Swapping two consecutive operations at a state where they commute. *)
+Lemma eff_swap (a b : A) (m s : St) (R : St -> St -> Prop) :
+  (forall s', eff_comp O (effect O a) (effect O b) m s' ->
+              eff_comp O (effect O b) (effect O a) m s') ->
+  eff_comp O (effect O a) (eff_comp O (effect O b) R) m s ->
+  eff_comp O (effect O b) (eff_comp O (effect O a) R) m s.
+Proof.
+  move=> Hcomm [m1 [Ha [m2 [Hb HR]]]].
+  have [m1' [Hb' Ha']] : eff_comp O (effect O b) (effect O a) m m2
+    by apply: Hcomm; exists m1; by split.
+  exists m1'; split; first done; exists m2; by split.
+Qed.
+
 (** Replaying a valid causal history preserves the state invariant. *)
 Lemma effect_list_stateInv (OV : OperationValidity) (W : WithId)
     (hb : @CausalOrder A) (StateSource : A -> Prop)
@@ -194,6 +233,69 @@ Proof.
       - exact: Hpre.
       - exact: Hnd'. }
     exact: (stateInv_effect OV a m s HsiM Hva Ha).
+Qed.
+
+(** Moving an operation [a] rightward past a block of operations all concurrent
+    with it preserves the resulting state (relational [effect_list]). *)
+Lemma effect_list_reorder (OV : OperationValidity) (W : WithId) (hb : @CausalOrder A)
+    (StateSource : A -> Prop) (RV : OperationReplayValidity OV W hb StateSource) (a : A) :
+  forall (ops0 ops1 : list A) (s : St),
+    (forall x, x ∈ (ops0 ++ a :: ops1) -> StateSource x) ->
+    concurrent_commutative OV hb (ops0 ++ a :: ops1) ->
+    (forall x, x ∈ ops1 -> hb_concurrent hb x a) ->
+    hb_consistent hb (ops0 ++ a :: ops1) ->
+    hbClosed hb (ops0 ++ a :: ops1) ->
+    IdNoDup W (ops0 ++ a :: ops1) ->
+    effect_list (ops0 ++ a :: ops1) (op_init O) s ->
+    effect_list (ops0 ++ ops1 ++ [a]) (op_init O) s.
+Proof.
+  move=> ops0 ops1; move: ops0.
+  elim: ops1 => [| b ops1 IH] ops0 s Hsrc HC Hconc Hcons Hclosed Hnd Heff.
+  - exact: Heff.
+  - move: Heff => /effect_list_app [m [Hpre Hrest]].
+    have Hcons0 := hb_consistent_app_l _ _ _ Hcons.
+    have Hclosed0 := hbClosed_app_l _ _ _ Hclosed.
+    have Hnd0 := IdNoDup_app_l _ _ _ Hnd.
+    have Hsrc0 : forall x, x ∈ ops0 -> StateSource x
+      by move=> x Hx; apply: Hsrc; rewrite elem_of_app; by left.
+    have Hsi : StateInv OV m :=
+      effect_list_stateInv OV W hb StateSource RV ops0 m Hsrc0 Hcons0 Hclosed0 Hnd0 Hpre.
+    have Hba : hb_concurrent hb b a by apply: Hconc; rewrite elem_of_cons; by left.
+    have Hva : isValidState OV a m.
+    { apply: (isValidState_of_history _ _ _ _ RV a m ops0);
+        try by [exact: Hcons0 | exact: Hclosed0 | exact: Hpre | exact: Hnd0].
+      - apply: Hsrc; rewrite elem_of_app elem_of_cons; by right; left.
+      - move=> x Hlt; exact: (Hclosed a x ops0 (b :: ops1) eq_refl Hlt). }
+    have Hvb : isValidState OV b m.
+    { apply: (isValidState_of_history _ _ _ _ RV b m ops0);
+        try by [exact: Hcons0 | exact: Hclosed0 | exact: Hpre | exact: Hnd0].
+      - apply: Hsrc; rewrite elem_of_app !elem_of_cons; by right; right; left.
+      - move=> x Hlt.
+        have Hx : x ∈ ops0 ++ [a]
+          by apply: (Hclosed b x (ops0 ++ [a]) ops1 _ Hlt); rewrite -app_assoc.
+        move: Hx; rewrite elem_of_app elem_of_cons elem_of_nil => -[// | [Hxa | []]].
+        exfalso; subst x; move: Hba Hlt; rewrite /hb_concurrent /co_lt.
+        by move=> [_ Hnab] [Hab _]; apply: Hnab. }
+    have Hcomm_m : forall s', eff_comp O (effect O a) (effect O b) m s' ->
+                              eff_comp O (effect O b) (effect O a) m s'.
+    { move=> s' Hab; apply: (HC a b m s');
+        try by [exact: Hsi | exact: Hva | exact: Hvb | exact: Hab].
+      - rewrite elem_of_app elem_of_cons; by right; left.
+      - rewrite elem_of_app !elem_of_cons; by right; right; left.
+      - by rewrite hb_concurrent_symm. }
+    have Hswapped : effect_list (ops0 ++ b :: a :: ops1) (op_init O) s.
+    { apply/effect_list_app; exists m; split; first exact: Hpre.
+      apply: (eff_swap a b m s (effect_list ops1)); [exact: Hcomm_m | exact: Hrest]. }
+    have Hgoal : effect_list ((ops0 ++ [b]) ++ ops1 ++ [a]) (op_init O) s.
+    { apply: (IH (ops0 ++ [b]) s).
+      - move=> x Hx; apply: Hsrc; move: Hx; set_solver.
+      - move=> a' b' s0 s0' Ha' Hb'; apply: HC; move: Ha' Hb'; set_solver.
+      - move=> x Hx; apply: Hconc; rewrite elem_of_cons; by right.
+      - rewrite -app_assoc; exact: (hb_consistent_swap hb ops0 ops1 a b Hcons Hba).
+      - rewrite -app_assoc; exact: (hbClosed_swap hb ops0 ops1 a b Hclosed Hba).
+      - rewrite -app_assoc; exact: (IdNoDup_swap W ops0 ops1 a b Hnd).
+      - rewrite -app_assoc; exact: Hswapped. }
+    rewrite -!app_assoc in Hgoal; exact: Hgoal.
 Qed.
 
 End validity.
