@@ -57,6 +57,25 @@ Lemma effect_list_cons a ops s s' :
   effect_list (a :: ops) s s' <-> exists m, op_effect O a s m /\ effect_list ops m s'.
 Proof. done. Qed.
 
+Lemma effect_list_snoc ops a s s' :
+  effect_list (ops ++ [a]) s s' <-> exists m, effect_list ops s m /\ op_effect O a m s'.
+Proof.
+  elim: ops s => [| x xs IH] s.
+  - split.
+    + move=> [m0 [Ha Heq]]; exists s; split; [by apply/effect_list_nil | by subst].
+    + move=> [m [Hm Ha]]; move/effect_list_nil: Hm => Heq; subst m.
+      exists s'; split; [exact: Ha | done].
+  - have -> : (x :: xs) ++ [a] = x :: (xs ++ [a]) by [].
+    split.
+    + move=> [m1 [Hx Hrest]].
+      have [m [Hxs Ha]] := proj1 (IH m1) Hrest.
+      exists m; split; last exact: Ha.
+      exists m1; split; [exact: Hx | exact: Hxs].
+    + move=> [m [[m1 [Hx Hxs]] Ha]].
+      exists m1; split; first exact: Hx.
+      apply (proj2 (IH m1)); exists m; split; [exact: Hxs | exact: Ha].
+Qed.
+
 (** A validity discipline on states: a per-operation precondition
     [isValidState] and a global invariant [StateInv] preserved by valid steps. *)
 Record OperationValidity := {
