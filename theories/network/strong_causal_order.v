@@ -14,7 +14,7 @@ From iris.prelude Require Import options.
 From yjs.network Require Import causal_order hb_closed.
 
 Section strong_causal_order.
-Context {A : Type}.
+Context {A : Type} `{EqDecision A}.
 
 (** Consistency is preserved by swapping two adjacent concurrent operations. *)
 Lemma hb_consistent_swap hb (ops0 ops1 : list A) a b :
@@ -36,12 +36,70 @@ Proof.
     move=> y Hy; apply: Hno_x; move: Hy; rewrite !elem_of_app !elem_of_cons; tauto.
 Qed.
 
+(** Prefix-closure facts used by the convergence proof. *)
+Lemma hb_consistent_app_l hb (l1 l2 : list A) :
+  hb_consistent hb (l1 ++ l2) -> hb_consistent hb l1.
+Proof.
+  elim: l1 => [| x xs IH] /=; first by move=> _; exact: hb_consistent_nil.
+  move=> Hcons; inversion Hcons as [| ? ? Htail Hno]; subst.
+  apply: hb_consistent_cons; first exact: (IH Htail).
+  move=> y Hy; apply: Hno; rewrite elem_of_app; by left.
+Qed.
+
+Lemma hbClosed_app_l hb (l1 l2 : list A) :
+  hbClosed hb (l1 ++ l2) -> hbClosed hb l1.
+Proof.
+  move=> H a b p q Heq Hlt; apply: (H a b p (q ++ l2)); last done.
+  by rewrite Heq -app_assoc.
+Qed.
+
+Lemma hbClosed_pred_last hb (ops : list A) a :
+  hbClosed hb (ops ++ [a]) -> forall x, co_lt hb x a -> x ∈ ops.
+Proof. move=> H x Hlt; exact: (H a x ops [] eq_refl Hlt). Qed.
+
 (** Operations carry an identifier of type [S]. *)
 Context {S : Type} `{EqDecision S}.
 Record WithId := { wid : A -> S }.
 
 (** All operations in a list have distinct identifiers. *)
 Definition IdNoDup (W : WithId) (ops : list A) : Prop := NoDup (wid W <$> ops).
+
+Lemma IdNoDup_app_l (W : WithId) (l1 l2 : list A) :
+  IdNoDup W (l1 ++ l2) -> IdNoDup W l1.
+Proof. rewrite /IdNoDup fmap_app NoDup_app; tauto. Qed.
+
+Lemma not_in_of_idnodup_snoc (W : WithId) (l : list A) (b : A) :
+  IdNoDup W (l ++ [b]) -> b ∉ l.
+Proof.
+  rewrite /IdNoDup fmap_app NoDup_app => -[_ [Hmid _]] Hb.
+  apply: (Hmid (wid W b)); first (apply: list_elem_of_fmap_2; exact: Hb).
+  rewrite elem_of_cons; by left.
+Qed.
+
+Lemma idnodup_mid_not_in (W : WithId) (l1 l2 : list A) (b : A) :
+  IdNoDup W (l1 ++ b :: l2) -> b ∉ l1 /\ b ∉ l2.
+Proof.
+  rewrite /IdNoDup fmap_app fmap_cons NoDup_app NoDup_cons => -[_ [Hmid [Hnotin _]]].
+  split=> Hb.
+  - apply: (Hmid (wid W b)); first (apply: list_elem_of_fmap_2; exact: Hb).
+    rewrite elem_of_cons; by left.
+  - apply: Hnotin; apply: list_elem_of_fmap_2; exact: Hb.
+Qed.
+
+(** Removing the uniquely-identified [b] from both sides of a same-elements
+    relationship. *)
+Lemma mem_ops0_prefix_iff_ops1 (W : WithId)
+    (ops0_first ops0_last ops1 : list A) (a b : A) :
+  IdNoDup W (ops0_first ++ b :: ops0_last ++ [a]) ->
+  IdNoDup W (ops1 ++ [b]) ->
+  (forall x, x ∈ (ops0_first ++ b :: ops0_last ++ [a]) <-> x ∈ (ops1 ++ [b])) ->
+  forall x, x ∈ (ops0_first ++ ops0_last ++ [a]) <-> x ∈ ops1.
+Proof.
+  move=> Hnd0 Hnd1 Hmem.
+  have Hb1 := not_in_of_idnodup_snoc _ _ _ Hnd1.
+  have [Hbf Hbr] := idnodup_mid_not_in _ _ _ _ Hnd0.
+  move=> x; specialize (Hmem x); set_solver.
+Qed.
 
 Section validity.
 Context (O : @Operation A).
@@ -108,6 +166,35 @@ Definition concurrent_commutative (OV : OperationValidity) (hb : @CausalOrder A)
     StateInv OV s -> isValidState OV a s -> isValidState OV b s ->
     eff_comp O (effect O a) (effect O b) s s' ->
     eff_comp O (effect O b) (effect O a) s s'.
+
+(** Replaying a valid causal history preserves the state invariant. *)
+Lemma effect_list_stateInv (OV : OperationValidity) (W : WithId)
+    (hb : @CausalOrder A) (StateSource : A -> Prop)
+    (RV : OperationReplayValidity OV W hb StateSource) :
+  forall (ops : list A) (s : St),
+    (forall op, op ∈ ops -> StateSource op) ->
+    hb_consistent hb ops -> hbClosed hb ops -> IdNoDup W ops ->
+    effect_list ops (op_init O) s -> StateInv OV s.
+Proof.
+  move=> ops; elim/rev_ind: ops => [| a ops IH] s Hsrc Hcons Hclosed Hnd Heff.
+  - move: Heff => /effect_list_nil <-; exact: (stateInv_init OV).
+  - move: Heff => /effect_list_snoc [m [Hpre Ha]].
+    have Hcons' := hb_consistent_app_l _ _ _ Hcons.
+    have Hclosed' := hbClosed_app_l _ _ _ Hclosed.
+    have Hnd' := IdNoDup_app_l _ _ _ Hnd.
+    have Hsrc' : forall op, op ∈ ops -> StateSource op
+      by move=> op Hop; apply: Hsrc; rewrite elem_of_app; by left.
+    have HsiM : StateInv OV m := IH m Hsrc' Hcons' Hclosed' Hnd' Hpre.
+    have Hva : isValidState OV a m.
+    { apply: (isValidState_of_history _ _ _ _ RV a m ops).
+      - apply: Hsrc; rewrite elem_of_app elem_of_cons; by right; left.
+      - exact: (hbClosed_pred_last _ _ _ Hclosed).
+      - exact: Hcons'.
+      - exact: Hclosed'.
+      - exact: Hpre.
+      - exact: Hnd'. }
+    exact: (stateInv_effect OV a m s HsiM Hva Ha).
+Qed.
 
 End validity.
 
