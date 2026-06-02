@@ -14,3 +14,4 @@ theories/order/transitivity.v
 theories/order/asymmetry.v
 theories/network/causal_order.v
 theories/network/hb_closed.v
+theories/network/strong_causal_order.v
