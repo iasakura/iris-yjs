@@ -221,4 +221,94 @@ Next Obligation.
       [exact: (eq_sym Hba) | exfalso; exact: (HappensBefore_asymm cn a b Hab Hba)].
 Qed.
 
+(** ** Delivered-message lists *)
+
+Definition deliverP (e : Event) : option A :=
+  match e with EvDeliver a => Some a | EvBroadcast _ => None end.
+
+(** The messages delivered at node [i], in delivery order. *)
+Definition toDeliverMessages (nh : NodeHistories) (i : ClientId) : list A :=
+  omap deliverP (histories nh i).
+
+(** Splitting [omap deliverP] at an element reflects back to a split of the
+    history at the corresponding [EvDeliver]. *)
+Lemma omap_deliver_cons_inv (l : list Event) :
+  forall (pre suf : list A) (m : A),
+  omap deliverP l = pre ++ m :: suf ->
+  exists k1 k2, l = k1 ++ EvDeliver m :: k2 /\ omap deliverP k1 = pre /\ omap deliverP k2 = suf.
+Proof.
+  induction l as [|x l IH]; intros pre suf m Heq; simpl in Heq.
+  - by destruct pre; simplify_eq.
+  - destruct x as [a|a]; simpl in Heq.
+    + destruct (IH pre suf m Heq) as [k1 [k2 [Hl [Hk1 Hk2]]]].
+      exists (EvBroadcast a :: k1), k2; split; [by rewrite Hl | split; [exact: Hk1 | exact: Hk2]].
+    + destruct pre as [|p pre]; simpl in Heq.
+      * injection Heq as <- Hsuf; by exists [], l.
+      * injection Heq as <- Heq.
+        destruct (IH pre suf m Heq) as [k1 [k2 [Hl [Hk1 Hk2]]]].
+        exists (EvDeliver a :: k1), k2;
+          split; [by rewrite Hl | split; [by rewrite -Hk1 | exact: Hk2]].
+Qed.
+
+Lemma toDeliverMessages_histories (cn : CausalNetwork) (i : ClientId)
+    (l1 l2 l3 : list A) (m m' : A) :
+  toDeliverMessages cn i = l1 ++ [m] ++ l2 ++ [m'] ++ l3 ->
+  exists k1 k2 k3, histories cn i = k1 ++ [EvDeliver m] ++ k2 ++ [EvDeliver m'] ++ k3.
+Proof.
+  rewrite /toDeliverMessages => Heq.
+  have Heq' : omap deliverP (histories cn i) = l1 ++ m :: (l2 ++ m' :: l3)
+    by rewrite Heq.
+  have [k1 [k2 [Hl [_ Hk2]]]] := omap_deliver_cons_inv _ _ _ _ Heq'.
+  have [k1' [k2' [Hk2eq [_ _]]]] := omap_deliver_cons_inv _ _ _ _ Hk2.
+  exists k1, k1', k2'.
+  by rewrite Hl Hk2eq.
+Qed.
+
+Lemma toDeliverMessages_Nodup (cn : CausalNetwork) (i : ClientId) :
+  NoDup (toDeliverMessages cn i).
+Proof.
+  rewrite /toDeliverMessages.
+  move: (event_distinct cn i); elim: (histories cn i) => [|x l IH] /= Hnd.
+  - by constructor.
+  - move: Hnd; rewrite NoDup_cons => -[Hx Hnd].
+    case: x Hx => [a|a] Hx /=; first exact: IH Hnd.
+    apply: NoDup_cons_2; last exact: IH Hnd.
+    rewrite list_elem_of_omap => -[y [Hy Hdy]].
+    case: y Hy Hdy => [b|b] Hy //= [?]; subst b.
+    by apply: Hx.
+Qed.
+
+(** The messages delivered at a node are causally consistent under the induced
+    order: an earlier-delivered message never happens-after a later one. *)
+Lemma hb_consistent_local_history (cn : CausalNetwork) (i : ClientId) :
+  hb_consistent (network_causal_order cn) (toDeliverMessages cn i).
+Proof.
+  have Hnd := toDeliverMessages_Nodup cn i.
+  suff Haux : forall ms ms', ms ++ ms' = toDeliverMessages cn i ->
+    hb_consistent (network_causal_order cn) ms'.
+  { exact: (Haux [] _ eq_refl). }
+  move=> ms ms'; move: ms; elim: ms' => [|h t IH] ms Hms.
+  - constructor.
+  - apply: hb_consistent_cons.
+    + apply: (IH (ms ++ [h])); by rewrite -app_assoc.
+    + move=> mm Hmm Hle.
+      have [ta [tb Ht]] := list_elem_of_split _ _ Hmm.
+      have Hsplit : toDeliverMessages cn i = ms ++ [h] ++ ta ++ [mm] ++ tb
+        by rewrite -Hms Ht.
+      have [k1 [k2 [k3 Hhist]]] := toDeliverMessages_histories cn i _ _ _ _ _ Hsplit.
+      have Hlo : locallyOrdered cn i (EvDeliver h) (EvDeliver mm) by exists k1, k2, k3.
+      case: Hle => [Hmm_eq | Hmm_hb].
+      * subst mm.
+        move: Hnd; rewrite Hsplit.
+        rewrite (_ : ms ++ [h] ++ ta ++ [h] ++ tb = (ms ++ [h] ++ ta) ++ h :: tb);
+          last by rewrite -!app_assoc.
+        rewrite NoDup_app => -[_ [Hcr _]].
+        apply: (Hcr h); [set_solver | by rewrite elem_of_cons; left].
+      * have Hmem_dh : EvDeliver h ∈ histories cn i
+          by case: Hlo => p1 [p2 [p3 ->]]; set_solver.
+        have Hlo' : locallyOrdered cn i (EvDeliver mm) (EvDeliver h)
+          := causal_delivery cn i mm h Hmem_dh Hmm_hb.
+        exact: (locallyOrdered_asymm Hlo Hlo').
+Qed.
+
 End causal_network.
