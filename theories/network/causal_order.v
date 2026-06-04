@@ -90,6 +90,18 @@ Proof.
     + apply: IH => //; exact: (hb_consistent_tail _ _ _ Hcons).
 Qed.
 
+(** Suffix analogue of [hb_consistent_concurrent]: an element occurring after
+    [a] in a consistent list cannot be [co_le]-below [a]. *)
+Lemma hb_consistent_concurrent_r hb a (ops0 ops1 : list A) :
+  hb_consistent hb (ops0 ++ a :: ops1) ->
+  forall x, x ∈ ops1 -> ¬ co_le hb x a.
+Proof.
+  elim: ops0 => [| y ys IH] /=.
+  - move=> Hcons x Hx; inversion Hcons as [| ? ? ? Hno]; subst.
+    by apply: Hno.
+  - move=> Hcons; apply: IH; exact: (hb_consistent_tail _ _ _ Hcons).
+Qed.
+
 (** Operations and their relational effect on a state. *)
 Record Operation := MkOperation {
   op_State : Type;
