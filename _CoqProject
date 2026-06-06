@@ -18,3 +18,4 @@ theories/network/strong_causal_order.v
 theories/algorithm/basic.v
 theories/algorithm/insert_basic.v
 theories/algorithm/invariant_basic.v
+theories/algorithm/invariant_yjsarray.v
