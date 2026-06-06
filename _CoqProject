@@ -27,3 +27,4 @@ theories/algorithm/findptridx_getelem.v
 theories/algorithm/findptridx_origin.v
 theories/algorithm/toitem_lemmas.v
 theories/algorithm/findptridx_insert.v
+theories/algorithm/insert_invariant.v
