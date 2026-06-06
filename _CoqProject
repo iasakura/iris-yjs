@@ -20,3 +20,4 @@ theories/algorithm/insert_basic.v
 theories/algorithm/invariant_basic.v
 theories/algorithm/invariant_yjsarray.v
 theories/algorithm/invariant_yjsarray_idx.v
+theories/algorithm/insert_lemmas.v
