@@ -19,3 +19,4 @@ theories/algorithm/basic.v
 theories/algorithm/insert_basic.v
 theories/algorithm/invariant_basic.v
 theories/algorithm/invariant_yjsarray.v
+theories/algorithm/invariant_yjsarray_idx.v
