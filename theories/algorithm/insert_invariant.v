@@ -108,6 +108,17 @@ Proof using A EqDA.
       apply: (Hneq y (list_elem_of_lookup_2 _ _ _ Hjy)); by rewrite Heq.
 Qed.
 
+(** An item's right origin is never [First] (it lies strictly after the item). *)
+Lemma not_rightOrigin_first {P : ItemSet A} (item : YjsItem A) :
+  IsClosedItemSet P -> ItemSetInvariant P -> P (itemPtr item) -> rightOrigin item <> First.
+Proof using A.
+  move=> Hclosed Hinv Hin Heq.
+  have Hlt : YjsLt' (itemPtr item) (rightOrigin item).
+  { destruct item as [o r id c]; exists 1; apply: ltRightOrigin; apply: leqSame. }
+  destruct Hlt as [h Hlt]; rewrite Heq in Hlt.
+  exact: (not_ptr_lt_first Hclosed Hinv h (itemPtr item) Hin Hlt).
+Qed.
+
 Lemma findPtrIdx_lt_size_getElem (arr : list (YjsItem A)) (p : YjsPtr A) (idx : Z) :
   findPtrIdx p arr = Some idx -> (0 <= idx)%Z -> (Z.to_nat idx < length arr)%nat ->
   itemPtr <$> (arr !! Z.to_nat idx) = Some p.
