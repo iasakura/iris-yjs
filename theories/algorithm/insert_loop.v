@@ -639,4 +639,54 @@ Proof using A EqDA.
       have := Hmax a Ha Hcc; rewrite Haid; lia.
 Qed.
 
+(** Clock-safety of the input is exactly clock-maximality of the resolved item. *)
+Lemma isClockSafe_maximalId (input : IntegrateInput) (arr : list (YjsItem A)) (newItem : YjsItem A) :
+  toItem input arr = Some newItem ->
+  isClockSafe (in_id input) arr = true ->
+  maximalId newItem arr.
+Proof using A EqDA.
+  move=> Htoitem Hcs x Hx Hcc.
+  have [o [r [id [c [Hnewdef [_ [_ [Hid _]]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+  have Hidnew : item_id newItem = in_id input by rewrite Hnewdef /=.
+  move: Hcs; rewrite /isClockSafe => Hcs.
+  have Hforall : Forall (fun item => Is_true (implb (bool_decide (clientId (item_id item) = clientId (in_id input)))
+      (bool_decide (clock (item_id item) < clock (in_id input))))) arr by (apply/forallb_True; by rewrite Hcs).
+  move: Hforall => /Forall_forall Hforall.
+  have Hgx := Hforall x Hx.
+  have HP1 : bool_decide (clientId (item_id x) = clientId (in_id input)) = true
+    by (apply bool_decide_eq_true; rewrite -Hidnew; exact Hcc).
+  rewrite HP1 /= in Hgx.
+  move: Hgx => /Is_true_eq_true /bool_decide_eq_true Hclk.
+  rewrite Hidnew; exact Hclk.
+Qed.
+
+Theorem YjsArrInvariant_integrateSafe (input : IntegrateInput) (arr newArr : list (YjsItem A))
+    (newItem : YjsItem A) :
+  YjsArrInvariant arr ->
+  toItem input arr = Some newItem ->
+  IsItemValid newItem ->
+  integrateSafe input arr = Some newArr ->
+  exists i, (i <= length arr)%nat /\ newArr = insertIdxIfInBounds i newItem arr /\ YjsArrInvariant newArr.
+Proof using A EqDA.
+  move=> Harr Htoitem Hvalid Hint.
+  move: Hint; rewrite /integrateSafe.
+  destruct (isClockSafe (in_id input) arr) eqn:Hcs; last by (move=> H; discriminate H).
+  move=> Hint.
+  apply: (YjsArrInvariant_integrate input arr newArr newItem Harr Htoitem Hvalid _ Hint).
+  exact: (isClockSafe_maximalId input arr newItem Htoitem Hcs).
+Qed.
+
+Theorem YjsStateInvariant_insert (s newS : YjsState A) (input : IntegrateInput) (newItem : YjsItem A) :
+  YjsStateInvariant s ->
+  toItem input (st_items s) = Some newItem ->
+  IsItemValid newItem ->
+  YjsState_insert s input = Some newS ->
+  YjsStateInvariant newS.
+Proof using A EqDA.
+  rewrite /YjsStateInvariant /YjsState_insert.
+  move=> Hsinv Htoitem Hvalid /bind_Some [newArr [Hint [= <-]]].
+  have [i [_ [_ Hinv]]] := YjsArrInvariant_integrateSafe input (st_items s) newArr newItem Hsinv Htoitem Hvalid Hint.
+  exact Hinv.
+Qed.
+
 End integrate.
