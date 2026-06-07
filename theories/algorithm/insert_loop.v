@@ -10,7 +10,7 @@ From yjs Require Import client_id item item_set util.
 From yjs.order Require Import item_order item_set_invariant transitivity totality no_cross_origin.
 From yjs.algorithm Require Import basic insert_basic insert_lemmas invariant_basic
   invariant_yjsarray invariant_yjsarray_idx findptridx_order findptridx_order2
-  findptridx_getelem findptridx_origin insert_invariant.
+  findptridx_getelem findptridx_origin insert_invariant toitem_lemmas findptridx_insert.
 
 Section loop.
 Context {A : Type} `{EqDA : EqDecision A}.
@@ -517,3 +517,126 @@ Qed.
 End spec.
 
 End loop.
+
+(** Validity of the new item and clock-maximality, and the top-level integrate
+    correctness. Port of [IsItemValid], [maximalId], [YjsArrInvariant_integrate]
+    from [LeanYjs/Algorithm/Insert/Spec.lean]. *)
+Section integrate.
+Context {A : Type} `{EqDA : EqDecision A}.
+
+Record IsItemValid (item : YjsItem A) : Prop := {
+  iiv_origin_lt : YjsLt' (origin item) (rightOrigin item);
+  iiv_reachable : forall x, OriginReachable (itemPtr item) x ->
+    YjsLeq' x (origin item) \/ YjsLeq' (rightOrigin item) x;
+}.
+
+Definition maximalId (newItem : YjsItem A) (arr : list (YjsItem A)) : Prop :=
+  forall x, ArrSet arr (itemPtr x) ->
+    clientId (item_id x) = clientId (item_id newItem) ->
+    (clock (item_id x) < clock (item_id newItem))%nat.
+
+Lemma item_origin_lt (it : YjsItem A) : YjsLt' (origin it) (itemPtr it).
+Proof. destruct it as [o r id c]; exists 1; apply: ltOrigin; apply: leqSame. Qed.
+
+Theorem YjsArrInvariant_integrate (input : IntegrateInput) (arr newArr : list (YjsItem A))
+    (newItem : YjsItem A) :
+  YjsArrInvariant arr ->
+  toItem input arr = Some newItem ->
+  IsItemValid newItem ->
+  maximalId newItem arr ->
+  integrate input arr = Some newArr ->
+  exists i, (i <= length arr)%nat /\ newArr = insertIdxIfInBounds i newItem arr /\ YjsArrInvariant newArr.
+Proof using A EqDA.
+  move=> Harr Htoitem Hvalid Hmax.
+  rewrite /integrate.
+  move=> /bind_Some [leftIdx [HfindLeft Hr1]].
+  move: Hr1 => /bind_Some [rightIdx [HfindRight Hr2]].
+  move: Hr2 => /bind_Some [destIdx [HfindIdx Hr3]].
+  move: Hr3 => /bind_Some [item [Hmk [= <-]]].
+  have Huniq := yai_unique _ Harr.
+  (* origin / right-origin indices *)
+  have HfindL : findPtrIdx (origin newItem) arr = Some leftIdx.
+  { rewrite -(findLeftIdx_findPtrIdx_eq input newItem arr Huniq Htoitem); exact HfindLeft. }
+  have HfindR : findPtrIdx (rightOrigin newItem) arr = Some rightIdx.
+  { rewrite -(findRightIdx_findPtrIdx_eq input newItem arr Huniq Htoitem); exact HfindRight. }
+  have Horig_set : ArrSet arr (origin newItem) := @findPtrIdx_ArrSet _ EqDA arr (origin newItem) leftIdx HfindL.
+  have Hror_set : ArrSet arr (rightOrigin newItem) := @findPtrIdx_ArrSet _ EqDA arr (rightOrigin newItem) rightIdx HfindR.
+  have Hclosed : IsClosedItemSet (ArrSet (newItem :: arr)) :=
+    arr_set_closed_push arr newItem (yai_closed _ Harr) Horig_set Hror_set.
+  (* item set invariant after push *)
+  have Hsameid : forall x, ArrSet arr (itemPtr x) -> item_id x = item_id newItem -> x = newItem.
+  { move=> x Hx Hxid; exfalso.
+    have Hcc : clientId (item_id x) = clientId (item_id newItem) by rewrite Hxid.
+    have Hcl := Hmax x Hx Hcc; rewrite Hxid in Hcl; lia. }
+  have Hinv : ItemSetInvariant (ArrSet (newItem :: arr)) :=
+    item_set_invariant_push arr newItem (yai_item_set_inv _ Harr) (yai_closed _ Harr)
+      (iiv_origin_lt _ Hvalid) (iiv_reachable _ Hvalid) Hsameid.
+  have HleftIdx : (-1 <= leftIdx)%Z := findPtrIdx_ge_minus_1 arr (origin newItem) leftIdx HfindL.
+  have HRsize : (rightIdx <= Z.of_nat (length arr))%Z := findPtrIdx_le_size arr (rightOrigin newItem) rightIdx HfindR.
+  have HleftR : (leftIdx < rightIdx)%Z :=
+    @YjsLt'_findPtrIdx_lt _ EqDA arr (origin newItem) (rightOrigin newItem) leftIdx rightIdx
+      Harr Horig_set Hror_set (iiv_origin_lt _ Hvalid) HfindL HfindR.
+  (* the constructed item equals newItem *)
+  have [o [r [id [c [Hnewdef [HoLp [HoRp [Hid Hc]]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+  have Hitem : item = newItem.
+  { move: Hmk; rewrite /mkItemByIndex.
+    have [lptr [Hgl HLl]] := findLeftIdx_getElemExcept arr input leftIdx HfindLeft.
+    have [rptr [Hgr HRr]] := findRightIdx_getElemExcept arr input rightIdx HfindRight.
+    rewrite Hgl Hgr /=.
+    have Hlo : lptr = o := isLeftIdPtr_unique arr (in_originId input) lptr o HLl HoLp.
+    have Hro : rptr = r := isRightIdPtr_unique arr (in_rightOriginId input) rptr r HRr HoRp.
+    move=> [= <-]; by rewrite Hlo Hro Hnewdef Hid Hc. }
+  (* loop spec on the initial invariant *)
+  have Hidnew : item_id newItem = in_id input by rewrite Hnewdef /=.
+  move: HfindIdx; rewrite /findIntegratedIndex => /bind_Some [dval [Hfii [= Hdestdef]]].
+  have Hcideq : clientId (in_id input) = clientId (item_id newItem) by rewrite Hidnew.
+  rewrite Hcideq in Hfii.
+  (* P1 base: everything at/before leftIdx is < newItem *)
+  have HP1base : forall k y, (Z.of_nat k < leftIdx + 1)%Z -> arr !! k = Some y ->
+      YjsLt' (itemPtr y) (itemPtr newItem).
+  { move=> k y Hk Hy.
+    have Hkleft : (Z.of_nat k <= leftIdx)%Z by lia.
+    have Hl0 : (0 <= leftIdx)%Z by lia.
+    have Hlsz : (Z.to_nat leftIdx < length arr)%nat by lia.
+    have HH := @findPtrIdx_lt_size_getElem _ EqDA arr (origin newItem) leftIdx HfindL Hl0 Hlsz.
+    destruct (arr !! Z.to_nat leftIdx) as [oitm|] eqn:Hoitm; last by [].
+    move: HH; rewrite /= => -[Hooe].
+    have Hkle : (k <= Z.to_nat leftIdx)%nat by lia.
+    have Hyle : YjsLeq' (itemPtr y) (itemPtr oitm) :=
+      getElem_leq_YjsLeq' arr k (Z.to_nat leftIdx) y oitm Harr Hy Hoitm Hkle.
+    apply: (yjs_leq'_p_trans1 Hinv (itemPtr y) (itemPtr oitm) (itemPtr newItem)
+      (arrset_mem arr newItem y (list_elem_of_lookup_2 _ _ _ Hy))
+      (arrset_mem arr newItem oitm (list_elem_of_lookup_2 _ _ _ Hoitm))
+      (arrset_new arr newItem) Hclosed Hyle).
+    rewrite Hooe; exact: (item_origin_lt newItem). }
+  have Hlinv : LInv arr newItem leftIdx 1 false (leftIdx + 1)%Z.
+  { rewrite /LInv; split_and!.
+    - lia.
+    - simpl; lia.
+    - exact HP1base.
+    - move=> k yk Hk1 Hk2 Hyk; simpl in Hk2; exfalso; lia.
+    - done.
+    - move=> _; simpl; lia. }
+  have Hcount : (leftIdx + Z.of_nat 1 + Z.of_nat (Z.to_nat (rightIdx - leftIdx) - 1) = rightIdx)%Z by lia.
+  have [HC1 HC2] := fii_loop_spec arr newItem leftIdx rightIdx Hclosed Hinv Harr Hmax
+    HfindL HfindR HleftIdx HleftR HRsize (Z.to_nat (rightIdx - leftIdx) - 1) 1 false (leftIdx + 1)%Z dval
+    Hcount Hlinv Hfii.
+  (* assemble *)
+  have Hdvalpos : (0 <= dval)%Z by (have := fii_loop_bounds (Z.to_nat (rightIdx - leftIdx) - 1) 1 leftIdx rightIdx
+      (clientId (item_id newItem)) arr false (leftIdx + 1)%Z dval HleftIdx ltac:(lia) ltac:(lia) Hcount Hfii; lia).
+  have Hdvalsz : (dval <= rightIdx)%Z by (have := fii_loop_bounds (Z.to_nat (rightIdx - leftIdx) - 1) 1 leftIdx rightIdx
+      (clientId (item_id newItem)) arr false (leftIdx + 1)%Z dval HleftIdx ltac:(lia) ltac:(lia) Hcount Hfii; lia).
+  exists destIdx; split_and!.
+  - subst destIdx; lia.
+  - by rewrite Hitem.
+  - rewrite Hitem; subst destIdx.
+    apply: (YjsArrInvariant_insertIdxIfInBounds arr newItem (Z.to_nat dval) Hclosed Hinv Harr).
+    + lia.
+    + move=> y Hipos Hy; apply: (HC1 (Z.to_nat dval - 1) y _ Hy); lia.
+    + move=> y Hy; exact: (HC2 y Hy).
+    + move=> a Ha Haid.
+      have Hcc : clientId (item_id a) = clientId (item_id newItem) by rewrite Haid.
+      have := Hmax a Ha Hcc; rewrite Haid; lia.
+Qed.
+
+End integrate.
