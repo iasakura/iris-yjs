@@ -324,6 +324,196 @@ Proof using All.
   - exact: Hidlt.
 Qed.
 
+(** Same-origin and bigger-id from an advancing/scanning [other] with
+    [oLeftIdx = leftIdx]. *)
+Lemma same_origin_bigger_id (other : YjsItem A) (oLeftIdx : Z) :
+  other ∈ arr ->
+  findPtrIdx (origin other) arr = Some oLeftIdx -> oLeftIdx = leftIdx ->
+  ~ (clientId (item_id other) < clientId (item_id newItem))%nat ->
+  origin other = origin newItem /\ YjsId_lt (item_id newItem) (item_id other).
+Proof using All.
+  move=> Hmem HoL Hoeq Hcid.
+  have HoL' : findPtrIdx (origin other) arr = Some leftIdx by rewrite -Hoeq.
+  split.
+  - exact: (@findPtrIdx_eq_ok_inj _ EqDA arr (origin other) (origin newItem) leftIdx HoL' HfindL).
+  - rewrite /YjsId_lt; case_bool_decide as Hc; [apply: (Hmax other Hmem); by rewrite Hc | lia].
+Qed.
+
+(** The main loop-invariant spec: from [LInv] at entry, the returned destination
+    has everything before it [< newItem] and [arr] at it [> newItem]. *)
+Lemma fii_loop_spec : forall (count offset : nat) (scanning : bool) (destIdx d : Z),
+  (leftIdx + Z.of_nat offset + Z.of_nat count = rightIdx)%Z ->
+  LInv offset scanning destIdx ->
+  fii_loop count offset leftIdx rightIdx (clientId (item_id newItem)) arr scanning destIdx = Some d ->
+  (forall k y, (Z.of_nat k < d)%Z -> arr !! k = Some y -> YjsLt' (itemPtr y) (itemPtr newItem)) /\
+  (forall y, arr !! Z.to_nat d = Some y -> YjsLt' (itemPtr newItem) (itemPtr y)).
+Proof using All.
+  induction count as [|count' IH] => offset scanning destIdx d Hcount Hlinv Hloop.
+  - (* count = 0: cur = rightIdx; arr[rightIdx] = rightOrigin *)
+    move: Hloop => /= [= <-].
+    move: (Hlinv) => [Hbounds [HP1 _]].
+    split; first exact HP1.
+    apply: (exit_C2 offset scanning destIdx ltac:(lia) Hlinv).
+    move=> Hsz y Hy.
+    have Hcureq : (leftIdx + Z.of_nat offset = rightIdx)%Z by lia.
+    rewrite Hcureq in Hsz Hy.
+    have HH := @findPtrIdx_lt_size_getElem _ EqDA arr (rightOrigin newItem) rightIdx HfindR ltac:(lia) Hsz.
+    rewrite Hy /= in HH; injection HH as Hroeq.
+    rewrite Hroeq; exact: (item_lt_rightOrigin newItem).
+  - (* S count' *)
+    move: Hloop => /=; rewrite /getElemExcept.
+    move=> /bind_Some [other [Hother Hloop]].
+    move: Hloop => /bind_Some [oLeftIdx [HoL Hloop]].
+    move: Hloop => /bind_Some [oRightIdx [HoR Hloop]].
+    move: (Hlinv) => [Hbounds [HP1 [HPmid [Hscan Hnotscan]]]].
+    have Hcur0 : (0 <= leftIdx + Z.of_nat offset)%Z by lia.
+    have Hieq : Z.of_nat (Z.to_nat (leftIdx + Z.of_nat offset)) = (leftIdx + Z.of_nat offset)%Z
+      by rewrite Z2Nat.id.
+    have Hli : (leftIdx < leftIdx + Z.of_nat offset)%Z by lia.
+    have Hir : (leftIdx + Z.of_nat offset < rightIdx)%Z by lia.
+    have Hmem : other ∈ arr := list_elem_of_lookup_2 _ _ _ Hother.
+    have Hother_set := arrset_mem other Hmem.
+    (* the candidate at the current index, used by advancing P1 / scanning Pmid *)
+    have Hadvance : (leftIdx <= oLeftIdx)%Z -> (leftIdx = oLeftIdx -> YjsId_lt (item_id other) (item_id newItem)) ->
+        YjsLt' (origin other) (itemPtr newItem) -> YjsLt' (itemPtr other) (itemPtr newItem).
+    { move=> Hle Hidc Hoo.
+      apply: (other_lt_newItem (Z.to_nat (leftIdx + Z.of_nat offset)) other oLeftIdx oRightIdx
+                Hother _ _ HoL HoR Hle Hidc Hoo); lia. }
+    (* prefix-< update when destIdx advances to i+1, given other < newItem *)
+    have HP1adv : YjsLt' (itemPtr other) (itemPtr newItem) ->
+        forall k y, (Z.of_nat k < Z.of_nat (Z.to_nat (leftIdx + Z.of_nat offset) + 1))%Z ->
+          arr !! k = Some y -> YjsLt' (itemPtr y) (itemPtr newItem).
+    { move=> Hother_lt k yk Hk Hyk.
+      destruct (decide (Z.of_nat k < destIdx)%Z) as [Hkd|Hkd]; first exact: (HP1 k yk Hkd Hyk).
+      have Hki : (k <= Z.to_nat (leftIdx + Z.of_nat offset))%nat by lia.
+      have Hyko : YjsLeq' (itemPtr yk) (itemPtr other) :=
+        getElem_leq_YjsLeq' arr k (Z.to_nat (leftIdx + Z.of_nat offset)) yk other Harr Hyk Hother Hki.
+      apply: (yjs_leq'_p_trans1 Hinv (itemPtr yk) (itemPtr other) (itemPtr newItem)
+                (arrset_mem yk (list_elem_of_lookup_2 _ _ _ Hyk)) Hother_set arrset_new Hclosed Hyko Hother_lt). }
+    move: Hloop.
+    destruct (decide (oLeftIdx < leftIdx)%Z) as [Hc1|Hc1].
+    + (* break1 *)
+      move=> [= <-]; split; first exact HP1.
+      apply: (exit_C2 offset scanning destIdx ltac:(lia) Hlinv).
+      move=> Hsz z Hz; rewrite Hother in Hz; injection Hz as <-.
+      exact: (break1_newItem_lt (Z.to_nat (leftIdx + Z.of_nat offset)) other oLeftIdx Hother ltac:(lia) HoL Hc1).
+    + destruct (decide (oLeftIdx = leftIdx)%Z) as [Hc2|Hc2].
+      * (* oLeftIdx = leftIdx *)
+        destruct (decide (clientId (item_id other) < clientId (item_id newItem))%nat) as [Hc3|Hc3].
+        -- (* cid-advance: scanning:=false, destIdx:=i+1 *)
+           move=> Hrec.
+           have Hoo : YjsLt' (origin other) (itemPtr newItem).
+           { have Horeq : origin other = origin newItem :=
+               @findPtrIdx_eq_ok_inj _ EqDA arr (origin other) (origin newItem) leftIdx
+                 ltac:(rewrite -Hc2; exact HoL) HfindL.
+             rewrite Horeq; destruct newItem as [no nr nid nc]; rewrite /origin /=.
+             exists 1; apply: ltOrigin; apply: leqSame. }
+           have Hother_lt : YjsLt' (itemPtr other) (itemPtr newItem).
+           { apply: Hadvance; [lia | move=> _; rewrite /YjsId_lt; case_bool_decide as Hc; lia | exact Hoo]. }
+           apply: (IH (S offset) false (Z.of_nat (Z.to_nat (leftIdx + Z.of_nat offset) + 1)) d _ _ Hrec).
+           ++ lia.
+           ++ rewrite /LInv; split_and!.
+              ** lia.
+              ** lia.
+              ** exact: (HP1adv Hother_lt).
+              ** move=> k yk Hk1 Hk2 Hyk; exfalso; lia.
+              ** done.
+              ** move=> _; lia.
+        -- destruct (decide (oRightIdx = rightIdx)%Z) as [Hc4|Hc4].
+           ++ (* break2 *)
+              move=> [= <-]; split; first exact HP1.
+              apply: (exit_C2 offset scanning destIdx ltac:(lia) Hlinv).
+              move=> Hsz z Hz; rewrite Hother in Hz; injection Hz as <-.
+              exact: (break2_newItem_lt (Z.to_nat (leftIdx + Z.of_nat offset)) other oLeftIdx oRightIdx
+                        Hother HoL HoR Hc2 Hc4 Hc3).
+           ++ (* scan-true: scanning:=true, destIdx unchanged *)
+              move=> Hrec.
+              have Hcand := same_origin_bigger_id other oLeftIdx Hmem HoL Hc2 Hc3.
+              have Hpscan' : exists dy, arr !! Z.to_nat destIdx = Some dy /\ origin dy = origin newItem.
+              { destruct scanning; first exact: (Hscan eq_refl).
+                rewrite (Hnotscan eq_refl); exists other; split; [exact Hother | exact: (proj1 Hcand)]. }
+              apply: (IH (S offset) true destIdx d _ _ Hrec).
+              ** lia.
+              ** rewrite /LInv; split_and!.
+                 --- lia.
+                 --- lia.
+                 --- exact HP1.
+                 --- move=> k yk Hk1 Hk2 Hyk.
+                     destruct (decide (Z.of_nat k < leftIdx + Z.of_nat offset)%Z) as [Hkc|Hkc];
+                       first exact: (HPmid k yk Hk1 Hkc Hyk).
+                     left; have Hkeq : k = Z.to_nat (leftIdx + Z.of_nat offset) by lia.
+                     subst k; rewrite Hother in Hyk; injection Hyk as <-; exact Hcand.
+                 --- move=> _; exact Hpscan'.
+                 --- done.
+      * (* oLeftIdx > leftIdx *)
+        destruct scanning.
+        -- (* scan-stay: scanning=true, destIdx unchanged *)
+           move=> Hrec.
+           have [dy [Hdy Hdyo]] := Hscan eq_refl.
+           have Hdmem : dy ∈ arr := list_elem_of_lookup_2 _ _ _ Hdy.
+           have Hpmid_new : exists dy0, arr !! Z.to_nat destIdx = Some dy0 /\ YjsLeq' (itemPtr dy0) (origin other).
+           { have Hdid : (Z.to_nat destIdx <= Z.to_nat (leftIdx + Z.of_nat offset))%nat by lia.
+             have Hdle : YjsLeq' (itemPtr dy) (itemPtr other) :=
+               getElem_leq_YjsLeq' arr (Z.to_nat destIdx) (Z.to_nat (leftIdx + Z.of_nat offset)) dy other Harr Hdy Hother Hdid.
+             have Hdlt : YjsLt' (itemPtr dy) (itemPtr other).
+             { case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hdle) => [Heq | Hlt]; [|exact Hlt].
+               exfalso; have Hdoeq : origin other = origin newItem by (move: Heq => [= <-]; exact Hdyo).
+               have : (leftIdx = oLeftIdx)%Z.
+               { have HoL2 : findPtrIdx (origin newItem) arr = Some oLeftIdx by rewrite -Hdoeq.
+                 by move: HoL2; rewrite HfindL => -[= ->]. }
+               lia. }
+             case: (no_cross_origin Hclosed Hinv dy other (arrset_mem dy Hdmem) Hother_set Hdlt) => [Hle1 | Hle1].
+             - exfalso.
+               have Hle : (oLeftIdx <= leftIdx)%Z.
+               { apply: (@YjsLeq'_findPtrIdx_leq _ EqDA arr (origin other) (origin dy) oLeftIdx leftIdx
+                   Harr (@findPtrIdx_ArrSet _ EqDA arr (origin other) oLeftIdx HoL)
+                   (@findPtrIdx_ArrSet _ EqDA arr (origin dy) leftIdx ltac:(rewrite Hdyo; exact HfindL))
+                   Hle1 HoL ltac:(rewrite Hdyo; exact HfindL)). }
+               lia.
+             - exists dy; split; [exact Hdy | exact Hle1]. }
+           apply: (IH (S offset) true destIdx d _ _ Hrec).
+           ** lia.
+           ** rewrite /LInv; split_and!.
+              --- lia.
+              --- lia.
+              --- exact HP1.
+              --- move=> k yk Hk1 Hk2 Hyk.
+                  destruct (decide (Z.of_nat k < leftIdx + Z.of_nat offset)%Z) as [Hkc|Hkc];
+                    first exact: (HPmid k yk Hk1 Hkc Hyk).
+                  right; have Hkeq : k = Z.to_nat (leftIdx + Z.of_nat offset) by lia.
+                  subst k; rewrite Hother in Hyk; injection Hyk as <-; exact Hpmid_new.
+              --- move=> _; exact: (Hscan eq_refl).
+              --- done.
+        -- (* else-advance: scanning=false, destIdx:=i+1 *)
+           move=> Hrec.
+           have Hdest_i : destIdx = (leftIdx + Z.of_nat offset)%Z := Hnotscan eq_refl.
+           have Hoo : YjsLt' (origin other) (itemPtr newItem).
+           { have Horig_set : ArrSet arr (origin other) := @findPtrIdx_ArrSet _ EqDA arr (origin other) oLeftIdx HoL.
+             destruct (origin other) as [oo| |] eqn:Hooe.
+             - (* itemPtr oo at index oLeftIdx < destIdx *)
+               have Hoolt : YjsLt' (itemPtr oo) (itemPtr other).
+               { rewrite -Hooe; destruct other as [a b c e]; rewrite /origin /=; exists 1; apply: ltOrigin; apply: leqSame. }
+               have [k Hk] := arr_set_item_exists_index arr oo Horig_set.
+               have HkLt : (k < Z.to_nat (leftIdx + Z.of_nat offset))%nat :=
+                 @getElem_YjsLt'_index_lt _ EqDA arr k (Z.to_nat (leftIdx + Z.of_nat offset)) oo other Harr Hk Hother Hoolt.
+               apply: (HP1 k oo _ Hk); lia.
+             - apply: YjsLt'_ltOriginOrder; apply: lt_first.
+             - exfalso. have Hol : YjsLt' (origin other) (itemPtr other).
+               { destruct other as [a b c e]; rewrite /origin /=; exists 1; apply: ltOrigin; apply: leqSame. }
+               move: Hol; rewrite Hooe => -[h Hol].
+               exact: (not_last_lt_ptr (yai_closed _ Harr) (yai_item_set_inv _ Harr) h (itemPtr other) Hmem Hol). }
+           have Hother_lt : YjsLt' (itemPtr other) (itemPtr newItem) by apply: Hadvance; [lia | lia | exact Hoo].
+           apply: (IH (S offset) false (Z.of_nat (Z.to_nat (leftIdx + Z.of_nat offset) + 1)) d _ _ Hrec).
+           ** lia.
+           ** rewrite /LInv; split_and!.
+              --- lia.
+              --- lia.
+              --- exact: (HP1adv Hother_lt).
+              --- move=> k yk Hk1 Hk2 Hyk; exfalso; lia.
+              --- done.
+              --- move=> _; lia.
+Qed.
+
 End spec.
 
 End loop.
