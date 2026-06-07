@@ -10,7 +10,7 @@ From yjs Require Import client_id item item_set util.
 From yjs.order Require Import item_order item_set_invariant transitivity.
 From yjs.algorithm Require Import basic insert_basic invariant_basic
   invariant_yjsarray invariant_yjsarray_idx findptridx_order findptridx_order2
-  findptridx_getelem insert_invariant.
+  findptridx_getelem findptridx_origin insert_invariant.
 
 Section loop.
 Context {A : Type} `{EqDA : EqDecision A}.
@@ -160,5 +160,95 @@ Proof using A EqDA.
     destruct y as [yo yr yid yc]; rewrite /origin /= in hlt_o.
     apply: YjsLt'_ltOrigin; apply: YjsLeq'_leqLt; exact: hlt_o.
 Qed.
+
+(** [newItem] is below the (structural) right origin. *)
+Lemma item_lt_rightOrigin (it : YjsItem A) : YjsLt' (itemPtr it) (rightOrigin it).
+Proof. destruct it as [o r id c]; exists 1; apply: ltRightOrigin; apply: leqSame. Qed.
+
+(** Loop-invariant maintenance for [fii_loop]. The standing hypotheses fix the
+    new item and its resolved origin/right-origin indices. *)
+Section spec.
+Context (arr : list (YjsItem A)) (newItem : YjsItem A) (leftIdx rightIdx : Z).
+Context
+  (Hclosed : IsClosedItemSet (ArrSet (newItem :: arr)))
+  (Hinv : ItemSetInvariant (ArrSet (newItem :: arr)))
+  (Harr : YjsArrInvariant arr)
+  (Hmax : forall x, ArrSet arr (itemPtr x) ->
+     clientId (item_id x) = clientId (item_id newItem) ->
+     (clock (item_id x) < clock (item_id newItem))%nat)
+  (HfindL : findPtrIdx (origin newItem) arr = Some leftIdx)
+  (HfindR : findPtrIdx (rightOrigin newItem) arr = Some rightIdx)
+  (HleftIdx : (-1 <= leftIdx)%Z)
+  (HleftR : (leftIdx < rightIdx)%Z)
+  (HRsize : (rightIdx <= Z.of_nat (length arr))%Z).
+
+(** The carried invariant at loop state [(offset, scanning, destIdx)];
+    [cur = leftIdx + offset] is the next index to scan. *)
+Definition LInv (offset : nat) (scanning : bool) (destIdx : Z) : Prop :=
+  (leftIdx + 1 <= destIdx <= leftIdx + Z.of_nat offset)%Z /\
+  (forall k y, (Z.of_nat k < destIdx)%Z -> arr !! k = Some y ->
+     YjsLt' (itemPtr y) (itemPtr newItem)) /\
+  (forall k y, (destIdx <= Z.of_nat k)%Z -> (Z.of_nat k < leftIdx + Z.of_nat offset)%Z ->
+     arr !! k = Some y ->
+     (origin y = origin newItem /\ YjsId_lt (item_id newItem) (item_id y)) \/
+     (exists dy, arr !! Z.to_nat destIdx = Some dy /\ YjsLeq' (itemPtr dy) (origin y))) /\
+  (scanning = true -> exists dy, arr !! Z.to_nat destIdx = Some dy /\ origin dy = origin newItem) /\
+  (scanning = false -> destIdx = (leftIdx + Z.of_nat offset)%Z).
+
+(** At any exit point the destination is below [arr[destIdx]], by pushing the
+    [cur]-anchor back through the candidate range. *)
+Lemma exit_C2 (offset : nat) (scanning : bool) (destIdx : Z) :
+  (leftIdx + Z.of_nat offset <= rightIdx)%Z ->
+  LInv offset scanning destIdx ->
+  ((Z.to_nat (leftIdx + Z.of_nat offset) < length arr)%nat -> forall y,
+     arr !! Z.to_nat (leftIdx + Z.of_nat offset) = Some y -> YjsLt' (itemPtr newItem) (itemPtr y)) ->
+  forall y, arr !! Z.to_nat destIdx = Some y -> YjsLt' (itemPtr newItem) (itemPtr y).
+Proof using All.
+  move=> Hcurle [Hbounds [HP1 [HPmid [_ _]]]] Hanchor y Hy.
+  have Hcur0 : (0 <= leftIdx + Z.of_nat offset)%Z by lia.
+  apply: (loopInv_YjsLt' arr newItem rightIdx destIdx (Z.to_nat (leftIdx + Z.of_nat offset))
+            Hclosed Hinv Harr HfindR ltac:(lia) _ _ Hanchor (Z.to_nat destIdx) y _ _ Hy).
+  - rewrite Z2Nat.id; lia.
+  - move=> k yk Hdk Hkcur Hyk.
+    apply: (HPmid k yk Hdk _ Hyk); lia.
+  - lia.
+  - lia.
+Qed.
+
+(** In an advancing step, the scanned [other] is below [newItem]. *)
+Lemma other_lt_newItem (i : nat) (other : YjsItem A) (oLeftIdx oRightIdx : Z) :
+  arr !! i = Some other ->
+  (leftIdx < Z.of_nat i)%Z -> (Z.of_nat i < rightIdx)%Z ->
+  findPtrIdx (origin other) arr = Some oLeftIdx ->
+  findPtrIdx (rightOrigin other) arr = Some oRightIdx ->
+  (leftIdx <= oLeftIdx)%Z ->
+  (leftIdx = oLeftIdx -> YjsId_lt (item_id other) (item_id newItem)) ->
+  YjsLt' (origin other) (itemPtr newItem) ->
+  YjsLt' (itemPtr other) (itemPtr newItem).
+Proof using All.
+  move=> Hi Hli Hir HoL HoR Hle Hidcond Hoo.
+  have HfindOther : findPtrIdx (itemPtr other) arr = Some (Z.of_nat i) := @findPtrIdx_getElem _ EqDA arr i other Harr Hi.
+  apply: (findPtrIdx_origin_leq_newItem_YjsLt' (newItem :: arr) arr other newItem
+            leftIdx rightIdx oLeftIdx oRightIdx).
+  - move=> z Hz; rewrite elem_of_cons; by right.
+  - rewrite elem_of_cons; by left.
+  - rewrite elem_of_cons; right; exact: (list_elem_of_lookup_2 _ _ _ Hi).
+  - exact Hclosed.
+  - exact Hinv.
+  - exact Harr.
+  - exact HfindL.
+  - exact HfindR.
+  - exact HoL.
+  - exact HoR.
+  - apply: (findPtrIdx_lt_YjsLt' arr (origin newItem) (itemPtr other) leftIdx (Z.of_nat i));
+      [exact Harr | exact HfindL | exact HfindOther | exact Hli].
+  - apply: (findPtrIdx_lt_YjsLt' arr (itemPtr other) (rightOrigin newItem) (Z.of_nat i) rightIdx);
+      [exact Harr | exact HfindOther | exact HfindR | exact Hir].
+  - exact Hle.
+  - exact Hidcond.
+  - exact Hoo.
+Qed.
+
+End spec.
 
 End loop.
