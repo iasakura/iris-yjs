@@ -7,8 +7,8 @@ From stdpp Require Import base list numbers sorting.
 From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set util.
-From yjs.order Require Import item_order item_set_invariant transitivity.
-From yjs.algorithm Require Import basic insert_basic invariant_basic
+From yjs.order Require Import item_order item_set_invariant transitivity totality no_cross_origin.
+From yjs.algorithm Require Import basic insert_basic insert_lemmas invariant_basic
   invariant_yjsarray invariant_yjsarray_idx findptridx_order findptridx_order2
   findptridx_getelem findptridx_origin insert_invariant.
 
@@ -247,6 +247,81 @@ Proof using All.
   - exact Hle.
   - exact Hidcond.
   - exact Hoo.
+Qed.
+
+(** Common to both break cases: useful memberships. *)
+Lemma arrset_new : ArrSet (newItem :: arr) (itemPtr newItem).
+Proof using A. by rewrite /ArrSet elem_of_cons; left. Qed.
+Lemma arrset_mem (z : YjsItem A) : z ∈ arr -> ArrSet (newItem :: arr) (itemPtr z).
+Proof using A. by move=> Hz; rewrite /ArrSet elem_of_cons; right. Qed.
+
+(** [other] is distinct from [newItem] (else the clock would be self-smaller). *)
+Lemma other_ne_newItem (other : YjsItem A) : other ∈ arr -> other <> newItem.
+Proof using A Hmax. move=> Hmem Heq; have := Hmax other Hmem; rewrite Heq => H; lia. Qed.
+
+(** break case 1: the scanned item's origin is strictly before [newItem]'s, so
+    [newItem] precedes it (uses no-cross-origin). *)
+Lemma break1_newItem_lt (i : nat) (other : YjsItem A) (oLeftIdx : Z) :
+  arr !! i = Some other ->
+  (leftIdx < Z.of_nat i)%Z ->
+  findPtrIdx (origin other) arr = Some oLeftIdx ->
+  (oLeftIdx < leftIdx)%Z ->
+  YjsLt' (itemPtr newItem) (itemPtr other).
+Proof using All.
+  move=> Hi Hli HoL Hc1.
+  have Hmem : other ∈ arr := list_elem_of_lookup_2 _ _ _ Hi.
+  have Hother_set := arrset_mem other Hmem.
+  have Hnew_set := arrset_new.
+  case: (YjsLeq'_or_YjsLt' Hinv Hclosed Hother_set Hnew_set) => [Hleq | Hlt]; last exact Hlt.
+  exfalso.
+  have Hotherlt : YjsLt' (itemPtr other) (itemPtr newItem).
+  { case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hleq) => [Heq | Hlt]; [|exact Hlt].
+    exfalso; have := other_ne_newItem other Hmem; congruence. }
+  have HfindOther : findPtrIdx (itemPtr other) arr = Some (Z.of_nat i)
+    := @findPtrIdx_getElem _ EqDA arr i other Harr Hi.
+  have Horig_new : ArrSet arr (origin newItem) := @findPtrIdx_ArrSet _ EqDA arr (origin newItem) leftIdx HfindL.
+  have Horig_oth : ArrSet arr (origin other) := @findPtrIdx_ArrSet _ EqDA arr (origin other) oLeftIdx HoL.
+  case: (no_cross_origin Hclosed Hinv other newItem Hother_set Hnew_set Hotherlt) => [Hle1 | Hle1].
+  - have Hle : (leftIdx <= oLeftIdx)%Z :=
+      @YjsLeq'_findPtrIdx_leq _ EqDA arr (origin newItem) (origin other) leftIdx oLeftIdx
+        Harr Horig_new Horig_oth Hle1 HfindL HoL.
+    lia.
+  - have Hle : (Z.of_nat i <= leftIdx)%Z :=
+      @YjsLeq'_findPtrIdx_leq _ EqDA arr (itemPtr other) (origin newItem) (Z.of_nat i) leftIdx
+        Harr Hmem Horig_new Hle1 HfindOther HfindL.
+    lia.
+Qed.
+
+(** break case 2: same origin and right origin as [newItem], and [other]'s
+    client id does not beat [newItem]'s, so [newItem] precedes [other]. *)
+Lemma break2_newItem_lt (i : nat) (other : YjsItem A) (oLeftIdx oRightIdx : Z) :
+  arr !! i = Some other ->
+  findPtrIdx (origin other) arr = Some oLeftIdx ->
+  findPtrIdx (rightOrigin other) arr = Some oRightIdx ->
+  oLeftIdx = leftIdx -> oRightIdx = rightIdx ->
+  ~ (clientId (item_id other) < clientId (item_id newItem))%nat ->
+  YjsLt' (itemPtr newItem) (itemPtr other).
+Proof using All.
+  move=> Hi HoL HoR Hoeq Hreq Hcid.
+  have Hmem : other ∈ arr := list_elem_of_lookup_2 _ _ _ Hi.
+  have HoL' : findPtrIdx (origin other) arr = Some leftIdx by rewrite -Hoeq.
+  have HoR' : findPtrIdx (rightOrigin other) arr = Some rightIdx by rewrite -Hreq.
+  have Horig_eq : origin newItem = origin other :=
+    @findPtrIdx_eq_ok_inj _ EqDA arr (origin newItem) (origin other) leftIdx HfindL HoL'.
+  have Hror_eq : rightOrigin newItem = rightOrigin other :=
+    @findPtrIdx_eq_ok_inj _ EqDA arr (rightOrigin newItem) (rightOrigin other) rightIdx HfindR HoR'.
+  have Hidlt : YjsId_lt (item_id newItem) (item_id other).
+  { rewrite /YjsId_lt; case_bool_decide as Hc.
+    - apply: (Hmax other Hmem); by rewrite Hc.
+    - lia. }
+  destruct newItem as [no nr nid nc]; destruct other as [oo orr oid oc].
+  move: Horig_eq Hror_eq Hidlt; rewrite /origin /rightOrigin /item_id /= => Horig_eq Hror_eq Hidlt.
+  subst oo; subst orr.
+  apply: YjsLt'_ltConflict.
+  apply: (ConflictLt'_ltOriginSame no nr nr nid oid nc oc).
+  - exact: (item_lt_rightOrigin (Item no nr nid nc)).
+  - exact: (item_lt_rightOrigin (Item no nr oid oc)).
+  - exact: Hidlt.
 Qed.
 
 End spec.
