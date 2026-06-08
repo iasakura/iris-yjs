@@ -445,4 +445,110 @@ Proof using A EqDA.
   apply in_app_or in Hx; apply in_or_app; destruct Hx as [Hx|Hx]; [by left | right; by apply in_cons].
 Qed.
 
+(** The resolved item's id is the input id. *)
+Lemma toItem_id (input : IntegrateInput) (arr : list (YjsItem A)) (newItem : YjsItem A) :
+  toItem input arr = Some newItem -> item_id newItem = in_id input.
+Proof using A EqDA.
+  move=> H; apply toItem_ok_iff in H.
+  destruct H as [o [r [id0 [c [-> [_ [_ [Hid _]]]]]]]]; exact Hid.
+Qed.
+
+(** If both [a] and [b] integrate, [b] still integrates after [a]. *)
+Lemma integrate_integrate_eq_some (arr1 arr2 arr2' : list (YjsItem A))
+    (a b : IntegrateInput) (aItem bItem : YjsItem A) :
+  YjsArrInvariant arr1 -> toItem a arr1 = Some aItem -> toItem b arr1 = Some bItem ->
+  clientId (in_id a) <> clientId (in_id b) -> IsItemValid aItem -> IsItemValid bItem ->
+  integrateSafe a arr1 = Some arr2 -> integrateSafe b arr1 = Some arr2' ->
+  exists arr3, integrateSafe b arr2 = Some arr3.
+Proof using A EqDA.
+  move=> Harr Ha Hb Hcid Hav Hbv HSa HSb'.
+  have [HcsA HIa] := integrateSafe_ok a arr1 arr2 HSa.
+  have [HcsB' HIb'] := integrateSafe_ok b arr1 arr2' HSb'.
+  have HmaxA : maximalId aItem arr1 := @isClockSafe_maximalId _ EqDA a arr1 aItem Ha HcsA.
+  have [idx2 [Hidx2 [Harr2eq Harr2inv]]] := YjsArrInvariant_integrate a arr1 arr2 aItem Harr Ha Hav HmaxA HIa.
+  have HbItem2 : toItem b arr2 = Some bItem.
+  { rewrite Harr2eq; apply: (toItem_insertIfInBounds b arr1 aItem bItem idx2 Hb).
+    rewrite -Harr2eq; exact: (yai_unique _ Harr2inv). }
+  have Hcid_ab : clientId (item_id aItem) <> clientId (in_id b)
+    by (rewrite (toItem_id a arr1 aItem Ha); exact Hcid).
+  have HcsB2 : isClockSafe (in_id b) arr2 = true.
+  { rewrite Harr2eq; exact: (isClockSafe_insert_true (in_id b) arr1 aItem idx2 HcsB' Hcid_ab). }
+  have [res Hres] := integrate_some b arr2 bItem Harr2inv HbItem2.
+  exists res; rewrite /integrateSafe HcsB2; exact Hres.
+Qed.
+
+(** If [a] fails (clock) but [b] succeeds, [a] still fails after [b]. *)
+Lemma integrate_integrate_eq_none (arr1 arr2' : list (YjsItem A))
+    (a b : IntegrateInput) (aItem bItem : YjsItem A) :
+  YjsArrInvariant arr1 -> toItem a arr1 = Some aItem -> toItem b arr1 = Some bItem ->
+  IsItemValid bItem ->
+  integrateSafe a arr1 = None -> integrateSafe b arr1 = Some arr2' ->
+  integrateSafe a arr2' = None.
+Proof using A EqDA.
+  move=> Harr Ha Hb Hbv HNa HSb'.
+  have [res Hres] := integrate_some a arr1 aItem Harr Ha.
+  have HcsA_false : isClockSafe (in_id a) arr1 = false.
+  { destruct (isClockSafe (in_id a) arr1) eqn:E; last done.
+    exfalso; move: HNa; rewrite /integrateSafe E Hres => H; discriminate H. }
+  have [HcsB' HIb'] := integrateSafe_ok b arr1 arr2' HSb'.
+  have HmaxB' : maximalId bItem arr1 := @isClockSafe_maximalId _ EqDA b arr1 bItem Hb HcsB'.
+  have [idx2' [Hidx2' [Harr2'eq Harr2'inv]]] := YjsArrInvariant_integrate b arr1 arr2' bItem Harr Hb Hbv HmaxB' HIb'.
+  have HcsA'_false : isClockSafe (in_id a) arr2' = false.
+  { destruct (isClockSafe (in_id a) arr2') eqn:E; last done.
+    exfalso; rewrite Harr2'eq in E.
+    have Hmono := isClockSafe_insert_mono (in_id a) arr1 bItem idx2' E.
+    rewrite HcsA_false in Hmono; discriminate Hmono. }
+  rewrite /integrateSafe HcsA'_false; done.
+Qed.
+
+(** Integration commutes (do-block equality on documents). *)
+Lemma integrate_commutative (a b : IntegrateInput) (aItem bItem : YjsItem A) (arr1 : list (YjsItem A)) :
+  YjsArrInvariant arr1 -> toItem a arr1 = Some aItem -> toItem b arr1 = Some bItem ->
+  clientId (in_id a) <> clientId (in_id b) -> IsItemValid aItem -> IsItemValid bItem ->
+  (integrateSafe a arr1 ≫= fun arr2 => integrateSafe b arr2) =
+  (integrateSafe b arr1 ≫= fun arr2' => integrateSafe a arr2').
+Proof using A EqDA.
+  move=> Harr Ha Hb Hcid Hav Hbv.
+  destruct (integrateSafe a arr1) as [arr2|] eqn:Hsa;
+    destruct (integrateSafe b arr1) as [arr2'|] eqn:Hsb; simpl.
+  - have [arr3 H3] := integrate_integrate_eq_some arr1 arr2 arr2' a b aItem bItem
+      Harr Ha Hb Hcid Hav Hbv Hsa Hsb.
+    have [arr3' H3'] := integrate_integrate_eq_some arr1 arr2' arr2 b a bItem aItem
+      Harr Hb Ha (fun H => Hcid (eq_sym H)) Hbv Hav Hsb Hsa.
+    rewrite H3 H3'; f_equal.
+    exact: (integrate_ok_commutative a b aItem bItem arr1 arr2 arr3 arr2' arr3'
+      Harr Ha Hb Hav Hbv Hsa H3 Hsb H3').
+  - exact: (integrate_integrate_eq_none arr1 arr2 b a bItem aItem Harr Hb Ha Hav Hsb Hsa).
+  - symmetry; exact: (integrate_integrate_eq_none arr1 arr2' a b aItem bItem Harr Ha Hb Hbv Hsa Hsb).
+  - done.
+Qed.
+
+(** Insertion commutes at the state level. *)
+Lemma YjsState_insert_commutative (a b : IntegrateInput) (aItem bItem : YjsItem A) (s : YjsState A) :
+  YjsStateInvariant s -> toItem a (st_items s) = Some aItem -> toItem b (st_items s) = Some bItem ->
+  clientId (in_id a) <> clientId (in_id b) -> IsItemValid aItem -> IsItemValid bItem ->
+  (YjsState_insert s a ≫= fun s2 => YjsState_insert s2 b) =
+  (YjsState_insert s b ≫= fun s2' => YjsState_insert s2' a).
+Proof using A EqDA.
+  move=> Hsinv Ha Hb Hcid Hav Hbv.
+  have Hcomm := integrate_commutative a b aItem bItem (st_items s) Hsinv Ha Hb Hcid Hav Hbv.
+  destruct (integrateSafe a (st_items s)) as [aArr|] eqn:HSa;
+    destruct (integrateSafe b (st_items s)) as [bArr|] eqn:HSb;
+    simpl in Hcomm; rewrite /YjsState_insert HSa HSb /=.
+  - by rewrite Hcomm.
+  - by rewrite Hcomm.
+  - by rewrite -Hcomm.
+  - done.
+Qed.
+
+Lemma insert_commutative (a b : IntegrateInput) (aItem bItem : YjsItem A) (s res : YjsState A) :
+  YjsStateInvariant s -> toItem a (st_items s) = Some aItem -> toItem b (st_items s) = Some bItem ->
+  clientId (in_id a) <> clientId (in_id b) -> IsItemValid aItem -> IsItemValid bItem ->
+  (YjsState_insert s a ≫= fun s2 => YjsState_insert s2 b) = Some res ->
+  (YjsState_insert s b ≫= fun s2' => YjsState_insert s2' a) = Some res.
+Proof using A EqDA.
+  move=> Hsinv Ha Hb Hcid Hav Hbv Hpre.
+  rewrite -(YjsState_insert_commutative a b aItem bItem s Hsinv Ha Hb Hcid Hav Hbv); exact Hpre.
+Qed.
+
 End commutativity.
