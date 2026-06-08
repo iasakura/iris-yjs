@@ -8,7 +8,7 @@ From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
 From yjs.algorithm Require Import basic insert_basic invariant_basic
-  invariant_yjsarray insert_loop.
+  invariant_yjsarray findptridx_insert insert_loop.
 
 (** Inserting a non-matching element keeps a failed search failed. *)
 Lemma list_find_insert_None {X} (P : X -> Prop) `{!∀ x, Decision (P x)}
@@ -146,6 +146,70 @@ Proof using A EqDA.
     rewrite /getPtrExcept.
     destruct (decide (Z.of_nat (length arr) = -1)%Z) as [?|_]; [lia|].
     destruct (decide (Z.of_nat (length arr) = Z.of_nat (length arr))%Z) as [_|?]; [done|lia].
+Qed.
+
+(** Clock-maximality after insertion implies it before (the converse of
+    [maximalId_insertIdxIfInBounds]). *)
+Lemma maximalId_insert (arr : list (YjsItem A)) (a x : YjsItem A) (idx : nat) :
+  maximalId x (insertIdxIfInBounds idx a arr) -> maximalId x arr.
+Proof using A EqDA.
+  move=> Hmax y Hy Hideq; apply: (Hmax y _ Hideq).
+  rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [_|_]; last exact Hy.
+  rewrite /ArrSet elem_of_app elem_of_cons.
+  have Hyd : y ∈ take idx arr \/ y ∈ drop idx arr by (rewrite -elem_of_app take_drop; exact Hy).
+  tauto.
+Qed.
+
+(** Index shift of left/right search under insertion of a different-id item. *)
+Lemma findLeftIdx_insert (arr : list (YjsItem A)) (a : YjsItem A) (originId : option YjsId)
+    (idx : nat) (leftIdx : Z) :
+  findLeftIdx originId arr = Some leftIdx -> originId <> Some (item_id a) ->
+  findLeftIdx originId (insertIdxIfInBounds idx a arr) =
+    Some (if decide (leftIdx < Z.of_nat idx)%Z then leftIdx else (leftIdx + 1)%Z).
+Proof using A EqDA.
+  rewrite /findLeftIdx; destruct originId as [id|].
+  - move=> /fmap_Some [k [Hk Hkeq]] Hne.
+    move: Hk => /fmap_Some [[k' item] [Hfind Hk'eq]]; simpl in Hk'eq; subst k.
+    subst leftIdx.
+    have Hpa : ¬ ((fun item0 => item_id item0 = id) a) by (move=> /= Hpa; apply Hne; by rewrite Hpa).
+    rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [Hidx|Hidx].
+    + rewrite (list_find_insert_shift (fun item0 => item_id item0 = id) arr idx k' item a Hpa Hidx Hfind) /=.
+      destruct (decide (idx <= k')%nat) as [Hle|Hle];
+        destruct (decide (Z.of_nat k' < Z.of_nat idx)%Z) as [Hz|Hz];
+        [exfalso;lia | f_equal;lia | by [] | exfalso;lia].
+    + rewrite Hfind /=.
+      have Hk'lt : (k' < length arr)%nat
+        by (have Hf := Hfind; apply list_find_Some in Hf; destruct Hf as (Hlk & _ & _); exact: lookup_lt_Some _ _ _ Hlk).
+      destruct (decide (Z.of_nat k' < Z.of_nat idx)%Z) as [Hz|Hz]; [done | exfalso; lia].
+  - move=> [= <-] Hne.
+    destruct (decide ((-1)%Z < Z.of_nat idx)%Z) as [_|Hc]; [done | exfalso; lia].
+Qed.
+
+Lemma findRightIdx_insert (arr : list (YjsItem A)) (a : YjsItem A) (originId : option YjsId)
+    (idx : nat) (rightIdx : Z) :
+  findRightIdx originId arr = Some rightIdx -> originId <> Some (item_id a) ->
+  findRightIdx originId (insertIdxIfInBounds idx a arr) =
+    Some (if decide (rightIdx < Z.of_nat idx)%Z then rightIdx else (rightIdx + 1)%Z).
+Proof using A EqDA.
+  rewrite /findRightIdx; destruct originId as [id|].
+  - move=> /fmap_Some [k [Hk Hkeq]] Hne.
+    move: Hk => /fmap_Some [[k' item] [Hfind Hk'eq]]; simpl in Hk'eq; subst k.
+    subst rightIdx.
+    have Hpa : ¬ ((fun item0 => item_id item0 = id) a) by (move=> /= Hpa; apply Hne; by rewrite Hpa).
+    rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [Hidx|Hidx].
+    + rewrite (list_find_insert_shift (fun item0 => item_id item0 = id) arr idx k' item a Hpa Hidx Hfind) /=.
+      destruct (decide (idx <= k')%nat) as [Hle|Hle];
+        destruct (decide (Z.of_nat k' < Z.of_nat idx)%Z) as [Hz|Hz];
+        [exfalso;lia | f_equal;lia | by [] | exfalso;lia].
+    + rewrite Hfind /=.
+      have Hk'lt : (k' < length arr)%nat
+        by (have Hf := Hfind; apply list_find_Some in Hf; destruct Hf as (Hlk & _ & _); exact: lookup_lt_Some _ _ _ Hlk).
+      destruct (decide (Z.of_nat k' < Z.of_nat idx)%Z) as [Hz|Hz]; [done | exfalso; lia].
+  - move=> [= <-] Hne.
+    rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [Hidx|Hidx].
+    + rewrite length_app /= length_take_le // length_drop.
+      destruct (decide (Z.of_nat (length arr) < Z.of_nat idx)%Z) as [Hz|Hz]; [exfalso;lia | f_equal; lia].
+    + destruct (decide (Z.of_nat (length arr) < Z.of_nat idx)%Z) as [Hz|Hz]; [done | exfalso; lia].
 Qed.
 
 End commutativity.
