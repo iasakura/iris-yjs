@@ -10,6 +10,16 @@ From yjs Require Import client_id item item_set.
 From yjs.algorithm Require Import basic insert_basic invariant_basic
   invariant_yjsarray insert_loop.
 
+(** Inserting a non-matching element keeps a failed search failed. *)
+Lemma list_find_insert_None {X} (P : X -> Prop) `{!∀ x, Decision (P x)}
+    (l : list X) (i : nat) (y : X) :
+  ¬ P y -> list_find P l = None -> list_find P (take i l ++ y :: drop i l) = None.
+Proof.
+  move=> Hy /list_find_None Hl.
+  apply/list_find_None; apply/Forall_app; split; [exact: Forall_take|].
+  apply/Forall_cons; split; [exact Hy | exact: Forall_drop].
+Qed.
+
 Section commutativity.
 Context {A : Type} `{EqDA : EqDecision A}.
 
@@ -45,6 +55,97 @@ Proof using A EqDA.
     + exfalso; apply Hbnin; rewrite -(take_drop idx arr) elem_of_app; by left.
     + subst b; exact Hane.
     + exfalso; apply Hbnin; rewrite -(take_drop idx arr) elem_of_app; by right.
+Qed.
+
+(** A failed pointer search stays failed after inserting a different item. *)
+Lemma findPtrIdx_none_insert (arr : list (YjsItem A)) (a p : YjsItem A) (idx : nat) :
+  findPtrIdx (itemPtr a) arr = None -> a <> p ->
+  findPtrIdx (itemPtr a) (insertIdxIfInBounds idx p arr) = None.
+Proof using A EqDA.
+  rewrite /findPtrIdx /find_item_idx => Hnone Hne.
+  have Hln : list_find (fun i => i = a) arr = None
+    by (apply fmap_None in Hnone; apply fmap_None in Hnone; exact Hnone).
+  have Hpa : ¬ ((fun i => i = a) p) by (move=> /= Hpa; apply Hne; by rewrite Hpa).
+  rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [_|_].
+  - by rewrite (list_find_insert_None (fun i => i = a) arr idx p Hpa Hln).
+  - by rewrite Hln.
+Qed.
+
+Lemma findLeftIdx_none_insert (arr : list (YjsItem A)) (a : YjsItem A) (originId : option YjsId) (idx : nat) :
+  findLeftIdx originId arr = None -> originId <> Some (item_id a) ->
+  findLeftIdx originId (insertIdxIfInBounds idx a arr) = None.
+Proof using A EqDA.
+  rewrite /findLeftIdx; destruct originId as [id|]; last (move=> H; discriminate H).
+  move=> Hnone Hne.
+  have Hln : list_find (fun item => item_id item = id) arr = None
+    by (apply fmap_None in Hnone; apply fmap_None in Hnone; exact Hnone).
+  have Hpa : ¬ ((fun item => item_id item = id) a) by (move=> /= Hpa; apply Hne; by rewrite Hpa).
+  rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [_|_].
+  - by rewrite (list_find_insert_None _ arr idx a Hpa Hln).
+  - by rewrite Hln.
+Qed.
+
+Lemma findRightIdx_none_insert (arr : list (YjsItem A)) (a : YjsItem A) (originId : option YjsId) (idx : nat) :
+  findRightIdx originId arr = None -> originId <> Some (item_id a) ->
+  findRightIdx originId (insertIdxIfInBounds idx a arr) = None.
+Proof using A EqDA.
+  rewrite /findRightIdx; destruct originId as [id|]; last (move=> H; discriminate H).
+  move=> Hnone Hne.
+  have Hln : list_find (fun item => item_id item = id) arr = None
+    by (apply fmap_None in Hnone; apply fmap_None in Hnone; exact Hnone).
+  have Hpa : ¬ ((fun item => item_id item = id) a) by (move=> /= Hpa; apply Hne; by rewrite Hpa).
+  rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [_|_].
+  - by rewrite (list_find_insert_None _ arr idx a Hpa Hln).
+  - by rewrite Hln.
+Qed.
+
+(** A successful left/right search yields the pointer it located. *)
+Lemma findLeftIdx_some_getPtrExcept_some (arr : list (YjsItem A)) (originId : option YjsId) (idx : Z) :
+  findLeftIdx originId arr = Some idx ->
+  exists p, getPtrExcept arr idx = Some p /\
+    match originId with
+    | Some id => exists item, p = itemPtr item /\ item_id item = id
+    | None => p = First
+    end.
+Proof using A EqDA.
+  rewrite /findLeftIdx; destruct originId as [id|].
+  - move=> /fmap_Some [k [Hk ->]].
+    move: Hk => /fmap_Some [[k' item] [Hfind Hkeq]]; simpl in Hkeq; subst k.
+    have Hfacts := Hfind; apply list_find_Some in Hfacts; destruct Hfacts as (Hlk & HP & _).
+    have Hlt : k' < length arr := lookup_lt_Some _ _ _ Hlk.
+    exists (itemPtr item); split.
+    + rewrite /getPtrExcept.
+      destruct (decide (Z.of_nat k' = -1)%Z) as [?|_]; [lia|].
+      destruct (decide (Z.of_nat k' = Z.of_nat (length arr))%Z) as [?|_]; [lia|].
+      by rewrite Nat2Z.id Hlk /=.
+    + exists item; split; [done|exact HP].
+  - move=> [= <-]; exists First; split; [|done].
+    rewrite /getPtrExcept; destruct (decide ((-1)%Z = -1)%Z) as [_|?]; [done|lia].
+Qed.
+
+Lemma findRightIdx_some_getPtrExcept_some (arr : list (YjsItem A)) (originId : option YjsId) (idx : Z) :
+  findRightIdx originId arr = Some idx ->
+  exists p, getPtrExcept arr idx = Some p /\
+    match originId with
+    | Some id => exists item, p = itemPtr item /\ item_id item = id
+    | None => p = Last
+    end.
+Proof using A EqDA.
+  rewrite /findRightIdx; destruct originId as [id|].
+  - move=> /fmap_Some [k [Hk ->]].
+    move: Hk => /fmap_Some [[k' item] [Hfind Hkeq]]; simpl in Hkeq; subst k.
+    have Hfacts := Hfind; apply list_find_Some in Hfacts; destruct Hfacts as (Hlk & HP & _).
+    have Hlt : k' < length arr := lookup_lt_Some _ _ _ Hlk.
+    exists (itemPtr item); split.
+    + rewrite /getPtrExcept.
+      destruct (decide (Z.of_nat k' = -1)%Z) as [?|_]; [lia|].
+      destruct (decide (Z.of_nat k' = Z.of_nat (length arr))%Z) as [?|_]; [lia|].
+      by rewrite Nat2Z.id Hlk /=.
+    + exists item; split; [done|exact HP].
+  - move=> [= <-]; exists Last; split; [|done].
+    rewrite /getPtrExcept.
+    destruct (decide (Z.of_nat (length arr) = -1)%Z) as [?|_]; [lia|].
+    destruct (decide (Z.of_nat (length arr) = Z.of_nat (length arr))%Z) as [_|?]; [done|lia].
 Qed.
 
 End commutativity.
