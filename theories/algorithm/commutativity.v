@@ -322,4 +322,69 @@ Proof using A EqDA.
   rewrite Hd /=; by exists (Z.to_nat d).
 Qed.
 
+(** A successful safe insert is clock-safe and integrates. *)
+Lemma integrateSafe_ok (input : IntegrateInput) (arr res : list (YjsItem A)) :
+  integrateSafe input arr = Some res ->
+  isClockSafe (in_id input) arr = true /\ integrate input arr = Some res.
+Proof using A EqDA.
+  rewrite /integrateSafe; destruct (isClockSafe (in_id input) arr) eqn:E;
+    [move=> H; split; [done|exact H] | move=> H; discriminate H].
+Qed.
+
+(** Membership in an in-bounds insertion. *)
+Lemma mem_insertIdxIfInBounds (arr : list (YjsItem A)) (a x : YjsItem A) (idx : nat) :
+  (idx <= length arr)%nat -> (x ∈ insertIdxIfInBounds idx a arr <-> x = a \/ x ∈ arr).
+Proof using A EqDA.
+  move=> Hidx; rewrite /insertIdxIfInBounds (decide_True _ _ Hidx) elem_of_app elem_of_cons.
+  have Hsplit : x ∈ arr <-> x ∈ take idx arr \/ x ∈ drop idx arr.
+  { rewrite -elem_of_app take_drop; tauto. }
+  rewrite Hsplit; tauto.
+Qed.
+
+(** Two opposite insertion orders of [a] and [b] produce equal documents
+    (same item set + determinism). *)
+Lemma integrate_ok_commutative (a b : IntegrateInput) (aItem bItem : YjsItem A)
+    (arr1 arr2 arr3 arr2' arr3' : list (YjsItem A)) :
+  YjsArrInvariant arr1 ->
+  toItem a arr1 = Some aItem ->
+  toItem b arr1 = Some bItem ->
+  IsItemValid aItem -> IsItemValid bItem ->
+  integrateSafe a arr1 = Some arr2 ->
+  integrateSafe b arr2 = Some arr3 ->
+  integrateSafe b arr1 = Some arr2' ->
+  integrateSafe a arr2' = Some arr3' ->
+  arr3 = arr3'.
+Proof using A EqDA.
+  move=> Harr Ha Hb Hav Hbv HSa HSb HSb' HSa'.
+  have [HcsA HIa] := integrateSafe_ok a arr1 arr2 HSa.
+  have [HcsB' HIb'] := integrateSafe_ok b arr1 arr2' HSb'.
+  have [HcsB HIb] := integrateSafe_ok b arr2 arr3 HSb.
+  have [HcsA' HIa'] := integrateSafe_ok a arr2' arr3' HSa'.
+  have HmaxA : maximalId aItem arr1 := @isClockSafe_maximalId _ EqDA a arr1 aItem Ha HcsA.
+  have HmaxB' : maximalId bItem arr1 := @isClockSafe_maximalId _ EqDA b arr1 bItem Hb HcsB'.
+  have [idx2 [Hidx2 [Harr2eq Harr2inv]]] := YjsArrInvariant_integrate a arr1 arr2 aItem Harr Ha Hav HmaxA HIa.
+  have [idx2' [Hidx2' [Harr2'eq Harr2'inv]]] := YjsArrInvariant_integrate b arr1 arr2' bItem Harr Hb Hbv HmaxB' HIb'.
+  have HbItem_arr2 : toItem b arr2 = Some bItem.
+  { rewrite Harr2eq; apply: (toItem_insertIfInBounds b arr1 aItem bItem idx2 Hb).
+    rewrite -Harr2eq; exact: (yai_unique _ Harr2inv). }
+  have HaItem_arr2' : toItem a arr2' = Some aItem.
+  { rewrite Harr2'eq; apply: (toItem_insertIfInBounds a arr1 bItem aItem idx2' Ha).
+    rewrite -Harr2'eq; exact: (yai_unique _ Harr2'inv). }
+  have HmaxB : maximalId bItem arr2 := @isClockSafe_maximalId _ EqDA b arr2 bItem HbItem_arr2 HcsB.
+  have HmaxA' : maximalId aItem arr2' := @isClockSafe_maximalId _ EqDA a arr2' aItem HaItem_arr2' HcsA'.
+  have [idx3 [Hidx3 [Harr3eq Harr3inv]]] := YjsArrInvariant_integrate b arr2 arr3 bItem Harr2inv HbItem_arr2 Hbv HmaxB HIb.
+  have [idx3' [Hidx3' [Harr3'eq Harr3'inv]]] := YjsArrInvariant_integrate a arr2' arr3' aItem Harr2'inv HaItem_arr2' Hav HmaxA' HIa'.
+  apply: (same_yjs_set_unique arr3 arr3' Harr3inv Harr3'inv).
+  move=> [x| |] /=; [|done|done].
+  have E1 : x ∈ arr3 <-> x = bItem \/ x ∈ arr2
+    by (rewrite Harr3eq; exact: (mem_insertIdxIfInBounds arr2 bItem x idx3 Hidx3)).
+  have E2 : x ∈ arr2 <-> x = aItem \/ x ∈ arr1
+    by (rewrite Harr2eq; exact: (mem_insertIdxIfInBounds arr1 aItem x idx2 Hidx2)).
+  have E3 : x ∈ arr3' <-> x = aItem \/ x ∈ arr2'
+    by (rewrite Harr3'eq; exact: (mem_insertIdxIfInBounds arr2' aItem x idx3' Hidx3')).
+  have E4 : x ∈ arr2' <-> x = bItem \/ x ∈ arr1
+    by (rewrite Harr2'eq; exact: (mem_insertIdxIfInBounds arr1 bItem x idx2' Hidx2')).
+  rewrite E1 E2 E3 E4; tauto.
+Qed.
+
 End commutativity.
