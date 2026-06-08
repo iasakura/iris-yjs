@@ -7,7 +7,7 @@ From stdpp Require Import base list numbers sorting.
 From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
-From yjs.algorithm Require Import basic insert_basic invariant_basic
+From yjs.algorithm Require Import basic insert_basic insert_lemmas invariant_basic
   invariant_yjsarray toitem_lemmas findptridx_insert insert_loop.
 
 (** Inserting a non-matching element keeps a failed search failed. *)
@@ -385,6 +385,64 @@ Proof using A EqDA.
   have E4 : x ∈ arr2' <-> x = bItem \/ x ∈ arr1
     by (rewrite Harr2'eq; exact: (mem_insertIdxIfInBounds arr1 bItem x idx2' Hidx2')).
   rewrite E1 E2 E3 E4; tauto.
+Qed.
+
+(** A valid input always integrates successfully. *)
+Lemma integrate_some (input : IntegrateInput) (arr : list (YjsItem A)) (newItem : YjsItem A) :
+  YjsArrInvariant arr -> toItem input arr = Some newItem ->
+  exists res, integrate input arr = Some res.
+Proof using A EqDA.
+  move=> Harr Htoitem.
+  have Huniq := yai_unique _ Harr.
+  have Horig : ArrSet arr (origin newItem).
+  { have [o [r [id0 [c [Hdef [HoL _]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+    rewrite Hdef /=; rewrite /isLeftIdPtr in HoL; destruct (in_originId input) as [oid|].
+    - destruct HoL as [oit [-> Hf]]; exact: (@find_by_id_mem _ EqDA oid arr oit Hf).
+    - by rewrite HoL. }
+  have Hrorig : ArrSet arr (rightOrigin newItem).
+  { have [o [r [id0 [c [Hdef [_ [HoR _]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+    rewrite Hdef /=; rewrite /isRightIdPtr in HoR; destruct (in_rightOriginId input) as [oid|].
+    - destruct HoR as [rit [-> Hf]]; exact: (@find_by_id_mem _ EqDA oid arr rit Hf).
+    - by rewrite HoR. }
+  have [lidx HlidxP] := ArrSet_findPtrIdx_some arr (origin newItem) Horig.
+  have [ridx HridxP] := ArrSet_findPtrIdx_some arr (rightOrigin newItem) Hrorig.
+  have HfindL : findLeftIdx (in_originId input) arr = Some lidx
+    by rewrite (findLeftIdx_findPtrIdx_eq input newItem arr Huniq Htoitem).
+  have HfindR : findRightIdx (in_rightOriginId input) arr = Some ridx
+    by rewrite (findRightIdx_findPtrIdx_eq input newItem arr Huniq Htoitem).
+  have Hl1 : (-1 <= lidx)%Z := findPtrIdx_ge_minus_1 arr (origin newItem) lidx HlidxP.
+  have Hl2 : (lidx <= Z.of_nat (length arr))%Z := findPtrIdx_le_size arr (origin newItem) lidx HlidxP.
+  have Hr1 : (-1 <= ridx)%Z := findPtrIdx_ge_minus_1 arr (rightOrigin newItem) ridx HridxP.
+  have Hr2 : (ridx <= Z.of_nat (length arr))%Z := findPtrIdx_le_size arr (rightOrigin newItem) ridx HridxP.
+  have [didx Hdidx] := findIntegratedIndex_safe lidx ridx input arr Harr Hl1 Hl2 Hr1 Hr2.
+  have [lp [Hlp _]] := findLeftIdx_getElemExcept arr input lidx HfindL.
+  have [rp [Hrp _]] := findRightIdx_getElemExcept arr input ridx HfindR.
+  exists (insertIdxIfInBounds didx (Item lp rp (in_id input) (in_content input)) arr).
+  rewrite /integrate HfindL /= HfindR /= Hdidx /= /mkItemByIndex Hlp /= Hrp /=; done.
+Qed.
+
+(** Clock-safety persists after inserting a different-client item. *)
+Lemma isClockSafe_insert_true (id : YjsId) (arr : list (YjsItem A)) (other : YjsItem A) (idx : nat) :
+  isClockSafe id arr = true -> clientId (item_id other) <> clientId id ->
+  isClockSafe id (insertIdxIfInBounds idx other arr) = true.
+Proof using A EqDA.
+  move=> Hsafe Hcid; rewrite /insertIdxIfInBounds.
+  destruct (decide (idx <= length arr)%nat) as [_|_]; last exact Hsafe.
+  move: Hsafe; rewrite /isClockSafe !forallb_forall => Hsafe x Hx.
+  apply in_app_or in Hx; destruct Hx as [Hx | [Hx | Hx]].
+  - apply Hsafe; rewrite -(take_drop idx arr); apply in_or_app; by left.
+  - subst x; by rewrite (bool_decide_eq_false_2 _ Hcid).
+  - apply Hsafe; rewrite -(take_drop idx arr); apply in_or_app; by right.
+Qed.
+
+(** Clock-safety reflects from the inserted array. *)
+Lemma isClockSafe_insert_mono (id : YjsId) (arr : list (YjsItem A)) (other : YjsItem A) (idx : nat) :
+  isClockSafe id (insertIdxIfInBounds idx other arr) = true -> isClockSafe id arr = true.
+Proof using A EqDA.
+  rewrite /insertIdxIfInBounds; destruct (decide (idx <= length arr)%nat) as [_|_]; last by move=> H.
+  rewrite /isClockSafe !forallb_forall => Hins x Hx.
+  apply Hins; rewrite -(take_drop idx arr) in Hx.
+  apply in_app_or in Hx; apply in_or_app; destruct Hx as [Hx|Hx]; [by left | right; by apply in_cons].
 Qed.
 
 End commutativity.
