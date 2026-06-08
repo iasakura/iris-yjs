@@ -254,4 +254,72 @@ Proof using A EqDA.
     rewrite (find_by_id_insert arr a id0 idx Hne Hidx); exact Hfind.
 Qed.
 
+(** A pointer in the array set has a [findPtrIdx]. *)
+Lemma ArrSet_findPtrIdx_some (arr : list (YjsItem A)) (p : YjsPtr A) :
+  ArrSet arr p -> exists idx, findPtrIdx p arr = Some idx.
+Proof using A EqDA.
+  destruct p as [it| |] => Hp.
+  - rewrite /findPtrIdx /find_item_idx.
+    destruct (list_find (fun i => i = it) arr) as [[k' x]|] eqn:Hf.
+    + by eexists.
+    + exfalso; apply list_find_None in Hf; rewrite ->Forall_forall in Hf.
+      exact: (Hf it Hp eq_refl).
+  - by exists (-1)%Z.
+  - by exists (Z.of_nat (length arr)).
+Qed.
+
+(** The scan terminates with a result whenever the indices it visits are in
+    range (origins are resolvable by array closedness). *)
+Lemma fii_loop_total (count offset : nat) (leftIdx rightIdx : Z) (cid : ClientId)
+    (arr : list (YjsItem A)) (scanning : bool) (destIdx : Z) :
+  YjsArrInvariant arr ->
+  (forall j, (j < count)%nat -> (0 <= leftIdx + Z.of_nat offset + Z.of_nat j)%Z /\
+     (leftIdx + Z.of_nat offset + Z.of_nat j < Z.of_nat (length arr))%Z) ->
+  exists d, fii_loop count offset leftIdx rightIdx cid arr scanning destIdx = Some d.
+Proof using A EqDA.
+  move=> Harr; move: offset scanning destIdx.
+  induction count as [|count' IH] => offset scanning destIdx Hvalid; first by exists destIdx.
+  have [Hi0 Hi1] := Hvalid 0%nat ltac:(lia); rewrite Z.add_0_r in Hi0 Hi1.
+  have Hi : (Z.to_nat (leftIdx + Z.of_nat offset) < length arr)%nat by lia.
+  simpl.
+  have [other Hother] : exists other, getElemExcept arr (Z.to_nat (leftIdx + Z.of_nat offset)) = Some other.
+  { rewrite /getElemExcept; destruct (lookup_lt_is_Some_2 arr _ Hi) as [other Ho]; by exists other. }
+  rewrite Hother /=.
+  have Hmem : other ∈ arr := list_elem_of_lookup_2 _ _ _ Hother.
+  have Hoset : ArrSet arr (origin other)
+    by (destruct other as [o r id c]; exact: (closedLeft _ (yai_closed _ Harr) o r id c Hmem)).
+  have Hrset : ArrSet arr (rightOrigin other)
+    by (destruct other as [o r id c]; exact: (closedRight _ (yai_closed _ Harr) o r id c Hmem)).
+  have [oL HoL] := ArrSet_findPtrIdx_some arr (origin other) Hoset.
+  have [oR HoR] := ArrSet_findPtrIdx_some arr (rightOrigin other) Hrset.
+  rewrite HoL /= HoR /=.
+  have Hrec : forall j, (j < count')%nat ->
+    (0 <= leftIdx + Z.of_nat (S offset) + Z.of_nat j)%Z /\
+    (leftIdx + Z.of_nat (S offset) + Z.of_nat j < Z.of_nat (length arr))%Z
+    by (move=> j Hj; have := Hvalid (S j) ltac:(lia); lia).
+  destruct (decide (oL < leftIdx)%Z); first by exists destIdx.
+  destruct (decide (oL = leftIdx)%Z).
+  - destruct (decide (clientId (item_id other) < cid)%nat).
+    + exact: (IH (S offset) false _ Hrec).
+    + destruct (decide (oR = rightIdx)%Z); first by exists destIdx.
+      exact: (IH (S offset) true _ Hrec).
+  - exact: (IH (S offset) scanning _ Hrec).
+Qed.
+
+(** [findIntegratedIndex] always succeeds for in-range left/right indices. *)
+Lemma findIntegratedIndex_safe (leftIdx rightIdx : Z) (input : IntegrateInput) (arr : list (YjsItem A)) :
+  YjsArrInvariant arr ->
+  (-1 <= leftIdx)%Z -> (leftIdx <= Z.of_nat (length arr))%Z ->
+  (-1 <= rightIdx)%Z -> (rightIdx <= Z.of_nat (length arr))%Z ->
+  exists idx, findIntegratedIndex leftIdx rightIdx input arr = Some idx.
+Proof using A EqDA.
+  move=> Harr Hl1 Hl2 Hr1 Hr2; rewrite /findIntegratedIndex.
+  have Hvalid : forall j, (j < Z.to_nat (rightIdx - leftIdx) - 1)%nat ->
+    (0 <= leftIdx + Z.of_nat 1 + Z.of_nat j)%Z /\ (leftIdx + Z.of_nat 1 + Z.of_nat j < Z.of_nat (length arr))%Z
+    by (move=> j Hj; split; lia).
+  have [d Hd] := fii_loop_total (Z.to_nat (rightIdx - leftIdx) - 1) 1 leftIdx rightIdx
+    (clientId (in_id input)) arr false (leftIdx + 1)%Z Harr Hvalid.
+  rewrite Hd /=; by exists (Z.to_nat d).
+Qed.
+
 End commutativity.
