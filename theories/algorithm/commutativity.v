@@ -8,7 +8,7 @@ From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
 From yjs.algorithm Require Import basic insert_basic invariant_basic
-  invariant_yjsarray findptridx_insert insert_loop.
+  invariant_yjsarray toitem_lemmas findptridx_insert insert_loop.
 
 (** Inserting a non-matching element keeps a failed search failed. *)
 Lemma list_find_insert_None {X} (P : X -> Prop) `{!∀ x, Decision (P x)}
@@ -210,6 +210,48 @@ Proof using A EqDA.
     + rewrite length_app /= length_take_le // length_drop.
       destruct (decide (Z.of_nat (length arr) < Z.of_nat idx)%Z) as [Hz|Hz]; [exfalso;lia | f_equal; lia].
     + destruct (decide (Z.of_nat (length arr) < Z.of_nat idx)%Z) as [Hz|Hz]; [done | exfalso; lia].
+Qed.
+
+(** A by-id lookup is unaffected by inserting a different-id item. *)
+Lemma find_by_id_insert (arr : list (YjsItem A)) (a : YjsItem A) (id : YjsId) (idx : nat) :
+  item_id a <> id -> (idx <= length arr)%nat ->
+  find_by_id id (insertIdxIfInBounds idx a arr) = find_by_id id arr.
+Proof using A EqDA.
+  move=> Hne Hidx; rewrite /find_by_id /insertIdxIfInBounds (decide_True _ _ Hidx).
+  have Hpa : ¬ ((fun item => item_id item = id) a) by (move=> /= H; apply Hne; exact H).
+  destruct (list_find (fun item => item_id item = id) arr) as [[k it]|] eqn:Hf.
+  - by rewrite (list_find_insert_shift (fun item => item_id item = id) arr idx k it a Hpa Hidx Hf) /=.
+  - by rewrite (list_find_insert_None (fun item => item_id item = id) arr idx a Hpa Hf) /=.
+Qed.
+
+(** [toItem] is stable under insertion of a fresh-id item. *)
+Lemma toItem_insertIfInBounds (input : IntegrateInput) (arr : list (YjsItem A)) (a item : YjsItem A) (idx : nat) :
+  toItem input arr = Some item ->
+  uniqueId (insertIdxIfInBounds idx a arr) ->
+  toItem input (insertIdxIfInBounds idx a arr) = Some item.
+Proof using A EqDA.
+  move=> Htoitem Huniq.
+  destruct (decide (idx <= length arr)%nat) as [Hidx|Hidx]; last first.
+  { rewrite /insertIdxIfInBounds (decide_False _ _ Hidx); exact Htoitem. }
+  apply toItem_ok_iff.
+  have [o [r [id [c [Hdef [HoL [HoR [Hid Hc]]]]]]]] := proj1 (toItem_ok_iff input arr item) Htoitem.
+  exists o, r, id, c; split_and!; [exact Hdef | | | exact Hid | exact Hc].
+  - rewrite /isLeftIdPtr in HoL *; destruct (in_originId input) as [id0|]; last exact HoL.
+    destruct HoL as [oit [Hoeq Hfind]]; exists oit; split; [exact Hoeq|].
+    have Hmem : oit ∈ arr := @find_by_id_mem _ EqDA id0 arr oit Hfind.
+    have Hidoit : item_id oit = id0 := @find_by_id_id _ EqDA id0 arr oit Hfind.
+    have Hne : item_id a <> id0.
+    { have H := @uniqueId_insertIdxIfInBounds_id_neq _ EqDA arr a oit idx Huniq Hidx Hmem.
+      by rewrite Hidoit in H. }
+    rewrite (find_by_id_insert arr a id0 idx Hne Hidx); exact Hfind.
+  - rewrite /isRightIdPtr in HoR *; destruct (in_rightOriginId input) as [id0|]; last exact HoR.
+    destruct HoR as [rit [Hreq Hfind]]; exists rit; split; [exact Hreq|].
+    have Hmem : rit ∈ arr := @find_by_id_mem _ EqDA id0 arr rit Hfind.
+    have Hidrit : item_id rit = id0 := @find_by_id_id _ EqDA id0 arr rit Hfind.
+    have Hne : item_id a <> id0.
+    { have H := @uniqueId_insertIdxIfInBounds_id_neq _ EqDA arr a rit idx Huniq Hidx Hmem.
+      by rewrite Hidrit in H. }
+    rewrite (find_by_id_insert arr a id0 idx Hne Hidx); exact Hfind.
 Qed.
 
 End commutativity.
