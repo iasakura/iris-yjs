@@ -8,7 +8,7 @@
 From stdpp Require Import base list numbers.
 From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
-From yjs Require Import client_id item item_set.
+From yjs Require Import client_id item item_set util.
 From yjs.algorithm Require Import basic insert_basic invariant_yjsarray
   toitem_lemmas findptridx_insert insert_invariant insert_loop delete commutativity.
 From yjs.network Require Import causal_order hb_closed strong_causal_order
@@ -435,6 +435,73 @@ Proof using A EqDA.
     move=> [rit [_ Hfind]].
     have [inR [Hmem Hid]] := effect_list_find_insert (omap deliverP preHist) s rid rit Hinterp Hfind.
     exists inR; split; [exact: (deliver_insert_mem_omap preHist inR Hmem) | exact Hid].
+Qed.
+
+(** ** Item determinism (the heart of [toItem_prefix_invariant])
+
+    Across any two replays of broadcast operations, the item carrying a given id
+    is the same. Proven by strong induction on the item's size: items embed
+    their origin / right-origin as subterms, so resolving them recurses on
+    strictly smaller items. The inserting op is identified up to equality by the
+    network's [msg_id_unique] (both operations are broadcast). *)
+Lemma item_determinism (network : YjsOperationNetwork) (it1 it2 : YjsItem A)
+    (ops1 ops2 : list Op) (s1 s2 : YjsState A) (oid : YjsId) :
+  (forall x, x ∈ ops1 -> exists k, EvBroadcast x ∈ histories network k) ->
+  (forall x, x ∈ ops2 -> exists k, EvBroadcast x ∈ histories network k) ->
+  effect_list O ops1 (op_init O) s1 ->
+  effect_list O ops2 (op_init O) s2 ->
+  find_by_id oid (st_items s1) = Some it1 ->
+  find_by_id oid (st_items s2) = Some it2 ->
+  it1 = it2.
+Proof using A EqDA.
+  remember (YjsItem_size it1) as n eqn:Hn.
+  move: it1 it2 ops1 ops2 s1 s2 oid Hn.
+  elim/nat_strong_ind: n => n IH it1 it2 ops1 ops2 s1 s2 oid
+    Hsize Hsrc1 Hsrc2 Heff1 Heff2 Hf1 Hf2.
+    have Hmem1 := @find_by_id_mem _ EqDA oid (st_items s1) it1 Hf1.
+    have Hmem2 := @find_by_id_mem _ EqDA oid (st_items s2) it2 Hf2.
+    case: (effect_list_mem_toItem ops1 (op_init O) s1 it1 Heff1 Hmem1)
+      => [Hnil1 | [inO1 [l1a [l1b [sMid1 [Hsplit1 [Hpre1 Htoit1]]]]]]];
+      first by move: Hnil1; rewrite /= elem_of_nil.
+    case: (effect_list_mem_toItem ops2 (op_init O) s2 it2 Heff2 Hmem2)
+      => [Hnil2 | [inO2 [l2a [l2b [sMid2 [Hsplit2 [Hpre2 Htoit2]]]]]]];
+      first by move: Hnil2; rewrite /= elem_of_nil.
+    have HidA := @find_by_id_id _ EqDA oid (st_items s1) it1 Hf1.
+    have HidB := @find_by_id_id _ EqDA oid (st_items s2) it2 Hf2.
+    have HinA : in_id inO1 = oid by rewrite -(@toItem_id _ EqDA inO1 (st_items sMid1) it1 Htoit1).
+    have HinB : in_id inO2 = oid by rewrite -(@toItem_id _ EqDA inO2 (st_items sMid2) it2 Htoit2).
+    have [k1 Hbc1] : exists k, EvBroadcast (OpInsert inO1) ∈ histories network k
+      by apply: Hsrc1; rewrite Hsplit1 elem_of_app elem_of_cons; right; left.
+    have [k2 Hbc2] : exists k, EvBroadcast (OpInsert inO2) ∈ histories network k
+      by apply: Hsrc2; rewrite Hsplit2 elem_of_app elem_of_cons; right; left.
+    have [_ HopEq] := msg_id_unique opid network (OpInsert inO1) (OpInsert inO2) k1 k2 Hbc1 Hbc2
+      ltac:(by rewrite /= HinA HinB).
+    move: HopEq => [= HinOeq]; subst inO2.
+    have HsrcL1 : forall x, x ∈ l1a -> exists k, EvBroadcast x ∈ histories network k
+      by move=> x Hx; apply: Hsrc1; rewrite Hsplit1 elem_of_app; left.
+    have HsrcL2 : forall x, x ∈ l2a -> exists k, EvBroadcast x ∈ histories network k
+      by move=> x Hx; apply: Hsrc2; rewrite Hsplit2 elem_of_app; left.
+    have [o1 [r1 [id1 [c1 [Hdef1 [HoL1 [HoR1 [Hidd1 Hcc1]]]]]]]] :=
+      proj1 (toItem_ok_iff inO1 (st_items sMid1) it1) Htoit1.
+    have [o2 [r2 [id2 [c2 [Hdef2 [HoL2 [HoR2 [Hidd2 Hcc2]]]]]]]] :=
+      proj1 (toItem_ok_iff inO1 (st_items sMid2) it2) Htoit2.
+    have Ho : o1 = o2.
+    { move: HoL1 HoL2; rewrite /isLeftIdPtr; destruct (in_originId inO1) as [oid'|].
+      - move=> [ot1 [Ho1eq Hfot1]] [ot2 [Ho2eq Hfot2]].
+        have HszOt : (YjsItem_size ot1 < n)%nat by rewrite Hsize Hdef1 Ho1eq /=; lia.
+        have Hoteq := IH (YjsItem_size ot1) HszOt ot1 ot2 l1a l2a sMid1 sMid2 oid'
+          eq_refl HsrcL1 HsrcL2 Hpre1 Hpre2 Hfot1 Hfot2.
+        by rewrite Ho1eq Ho2eq Hoteq.
+      - by move=> -> ->. }
+    have Hr : r1 = r2.
+    { move: HoR1 HoR2; rewrite /isRightIdPtr; destruct (in_rightOriginId inO1) as [rid'|].
+      - move=> [rt1 [Hr1eq Hfrt1]] [rt2 [Hr2eq Hfrt2]].
+        have HszRt : (YjsItem_size rt1 < n)%nat by rewrite Hsize Hdef1 Hr1eq /=; lia.
+        have Hrteq := IH (YjsItem_size rt1) HszRt rt1 rt2 l1a l2a sMid1 sMid2 rid'
+          eq_refl HsrcL1 HsrcL2 Hpre1 Hpre2 Hfrt1 Hfrt2.
+        by rewrite Hr1eq Hr2eq Hrteq.
+      - by move=> -> ->. }
+    by rewrite Hdef1 Hdef2 Ho Hr Hidd1 Hidd2 Hcc1 Hcc2.
 Qed.
 
 End yjs_replay_validity.
