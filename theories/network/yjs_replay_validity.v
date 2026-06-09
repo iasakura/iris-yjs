@@ -244,6 +244,45 @@ Proof using A EqDA.
     + right; exists input; split; [rewrite elem_of_cons; by right | exact Hid].
 Qed.
 
+(** Strengthening of [effect_step_mem_src]: a freshly-added item is exactly the
+    [toItem] resolution of the inserting op against the pre-state. *)
+Lemma effect_step_mem_toItem (op : Op) (s s' : YjsState A) (item : YjsItem A) :
+  op_effect O op s s' -> item ∈ st_items s' ->
+  item ∈ st_items s \/ (exists input, op = OpInsert input /\ toItem input (st_items s) = Some item).
+Proof using A EqDA.
+  destruct op as [input | id did]; simpl.
+  - move=> Hins Hmem.
+    have [it [didx [Htoit [_ [Hitems _]]]]] := YjsState_insert_toItem s s' input Hins.
+    rewrite Hitems in Hmem.
+    case: (decide (didx <= length (st_items s))%nat) => Hd.
+    + move: Hmem; rewrite (mem_insertIdxIfInBounds (st_items s) it item didx Hd) => -[Heq | Hin].
+      * right; exists input; split; [done | by rewrite Heq].
+      * by left.
+    + left; move: Hmem; by rewrite /insertIdxIfInBounds (decide_False _ _ Hd).
+  - by move=> -> Hmem; left.
+Qed.
+
+(** Trace an item in a replayed state to the [toItem] of its delivering insert
+    (no bound / validity hypotheses needed — the splice characterisation
+    suffices). *)
+Lemma effect_list_mem_toItem (ops : list Op) (s0 s : YjsState A) (item : YjsItem A) :
+  effect_list O ops s0 s -> item ∈ st_items s ->
+  item ∈ st_items s0 \/
+  (exists input l1 l2 sMid, ops = l1 ++ OpInsert input :: l2 /\
+     effect_list O l1 s0 sMid /\ toItem input (st_items sMid) = Some item).
+Proof using A EqDA.
+  elim: ops s0 s => [|op ops IH] s0 s.
+  - by move=> /(effect_list_nil O) <- Hmem; left.
+  - move=> /(effect_list_cons O) [m [Hop Hrest]] Hmem.
+    case: (IH m s Hrest Hmem) => [Hin | [input [l1 [l2 [sMid [Hsplit [Heff Htoit]]]]]]].
+    + case: (effect_step_mem_toItem op s0 m item Hop Hin) => [Hin0 | [input [Hopeq Htoit]]].
+      * by left.
+      * right; exists input, [], ops, s0.
+        rewrite Hopeq; split; [done | split; [by apply/(effect_list_nil O) | exact Htoit]].
+    + right; exists input, (op :: l1), l2, sMid.
+      split; [by rewrite Hsplit | split; [apply/(effect_list_cons O); by exists m | exact Htoit]].
+Qed.
+
 (** Replaying from the empty state: every item found by id was delivered by an
     insert with that id. (Relational analogue of [effect_list_find?_exists_insert_id].) *)
 Lemma effect_list_find_insert (ops : list Op) (s : YjsState A) (id : YjsId) (item : YjsItem A) :
