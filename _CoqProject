@@ -12,6 +12,7 @@ theories/order/item_set_invariant.v
 theories/order/totality.v
 theories/order/transitivity.v
 theories/order/asymmetry.v
+theories/order/no_cross_origin.v
 theories/network/causal_order.v
 theories/network/hb_closed.v
 theories/network/strong_causal_order.v
@@ -28,3 +29,4 @@ theories/algorithm/findptridx_origin.v
 theories/algorithm/toitem_lemmas.v
 theories/algorithm/findptridx_insert.v
 theories/algorithm/insert_invariant.v
+theories/algorithm/insert_loop.v
