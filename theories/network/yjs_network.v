@@ -10,7 +10,7 @@ From yjs Require Import client_id item item_set.
 From yjs.order Require Import item_order item_set_invariant.
 From yjs.network Require Import causal_order strong_causal_order.
 From yjs.algorithm Require Import basic insert_basic invariant_basic
-  invariant_yjsarray insert_loop delete.
+  invariant_yjsarray insert_loop delete commutativity.
 
 Section yjs_network.
 Context {A : Type} `{EqDA : EqDecision A}.
@@ -80,5 +80,38 @@ Qed.
 
 (** Operations carry their id. *)
 Definition YjsWithId : @WithId YjsOperation YjsId := {| wid := YjsOperation_id |}.
+
+(** The mathematical heart of network convergence: operations with distinct
+    client ids commute on valid states (the [hb_concurrent] -> distinct-client
+    discipline is supplied by the network). *)
+Lemma yjs_concurrent_commute (a b : YjsOperation) (s s' : YjsState A) :
+  clientId (YjsOperation_id a) <> clientId (YjsOperation_id b) ->
+  YjsStateInvariant s -> isValidStateYjs a s -> isValidStateYjs b s ->
+  eff_comp YjsOp (effect YjsOp a) (effect YjsOp b) s s' ->
+  eff_comp YjsOp (effect YjsOp b) (effect YjsOp a) s s'.
+Proof using A EqDA.
+  move=> Hcid Hsinv Hva Hvb.
+  destruct a as [ia | aid adid]; destruct b as [ib | bid bdid];
+    rewrite /eff_comp /effect /=.
+  - (* insert / insert *)
+    move: Hva Hvb => [aItem [Htoa Hava]] [bItem [Htob Hbvb]] [m [Ha Hb]].
+    have Hdo : (YjsState_insert s ia ≫= fun s2 => YjsState_insert s2 ib) = Some s'
+      by rewrite Ha /=; exact Hb.
+    have Hdo' := insert_commutative ia ib aItem bItem s s' Hsinv Htoa Htob Hcid Hava Hbvb Hdo.
+    move: Hdo' => /bind_Some [m' [Hb' Ha']]; by exists m'.
+  - (* insert / delete *)
+    move=> [m [Ha Hb]].
+    have Hdo : (YjsState_insert s ia ≫= fun newArr => Some (deleteById newArr bdid)) = Some s'
+      by rewrite Ha /=; rewrite Hb.
+    rewrite (insert_deleteById_commutative ia s bdid) in Hdo.
+    exists (deleteById s bdid); split; [done | exact Hdo].
+  - (* delete / insert *)
+    move=> [m [Ha Hb]].
+    have Hdo : (YjsState_insert s ib ≫= fun newArr => Some (deleteById newArr adid)) = Some s'.
+    { rewrite (insert_deleteById_commutative ib s adid); rewrite -Ha; exact Hb. }
+    move: Hdo => /bind_Some [m' [Hins Hdel]]; exists m'; split; [exact Hins | by injection Hdel].
+  - (* delete / delete *)
+    move=> [m [-> ->]]; exists (deleteById s bdid); split; [done | by rewrite deleteById_commutative].
+Qed.
 
 End yjs_network.
