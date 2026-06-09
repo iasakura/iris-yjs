@@ -228,4 +228,35 @@ Proof using A EqDA.
   - exists input; split; [exact Hop | by rewrite Hin Hidit].
 Qed.
 
+(** Transport of message validity along a state change that preserves the
+    origin/right-origin lookups. If [toItem] succeeds in [state0] and the
+    by-id finds it relied on are preserved in [s], then [toItem] resolves to the
+    same item in [s] and validity carries over unchanged. Port of
+    [toItem_isValid_transport_min_bridge] (the [uniqueId s] hypothesis is
+    unnecessary here). *)
+Lemma toItem_isValid_transport (input : IntegrateInput) (state0 s : list (YjsItem A))
+    (item0 : YjsItem A) :
+  toItem input state0 = Some item0 ->
+  IsItemValid item0 ->
+  (forall oid oit, find_by_id oid state0 = Some oit -> find_by_id oid s = Some oit) ->
+  exists item, toItem input s = Some item /\ IsItemValid item.
+Proof using A EqDA.
+  move=> Ht0 Hvalid Hpres; exists item0; split; last exact Hvalid.
+  move: Ht0; rewrite /toItem.
+  destruct (in_originId input) as [oid|]; destruct (in_rightOriginId input) as [rid|];
+    rewrite /=.
+  - move=> /bind_Some [op [Hop Hrest]].
+    move: Hop => /fmap_Some [oit [Hfo Hopeq]].
+    move: Hrest => /bind_Some [rp [Hrp Hlast]].
+    move: Hrp => /fmap_Some [rit [Hfr Hrpeq]]; subst op rp.
+    by rewrite (Hpres oid oit Hfo) /= (Hpres rid rit Hfr) /=.
+  - move=> /bind_Some [op [Hop Hlast]].
+    move: Hop => /fmap_Some [oit [Hfo Hopeq]]; subst op.
+    by rewrite (Hpres oid oit Hfo) /=.
+  - move=> /bind_Some [rp [Hrp Hlast]].
+    move: Hrp => /fmap_Some [rit [Hfr Hrpeq]]; subst rp.
+    by rewrite (Hpres rid rit Hfr) /=.
+  - by [].
+Qed.
+
 End yjs_replay_validity.
