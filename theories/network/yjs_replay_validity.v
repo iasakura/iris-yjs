@@ -10,7 +10,7 @@ From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
 From yjs.algorithm Require Import basic insert_basic invariant_yjsarray
-  toitem_lemmas insert_invariant insert_loop delete commutativity.
+  toitem_lemmas findptridx_insert insert_invariant insert_loop delete commutativity.
 From yjs.network Require Import causal_order hb_closed strong_causal_order
   causal_network operation_network yjs_network yjs_operation_network.
 
@@ -53,6 +53,36 @@ Proof using A EqDA.
   move=> Hint.
   have [didx [item [Hid Hres]]] := integrate_insertIdx_form input (st_items s) newArr Hint.
   exists didx, item; subst s'; by rewrite /=.
+Qed.
+
+(** A successful insert splices in exactly [toItem]'s result: the item produced
+    by an effect step is the [toItem] resolution of the input against the source
+    state. (Extraction part of [integrateValid_exists_insertIdxIfBounds]; needs
+    no validity — only that [integrate] resolved the origin/right-origin.) *)
+Lemma YjsState_insert_toItem (s s' : YjsState A) (input : IntegrateInput) :
+  YjsState_insert s input = Some s' ->
+  exists it didx,
+    toItem input (st_items s) = Some it /\
+    item_id it = in_id input /\
+    st_items s' = insertIdxIfInBounds didx it (st_items s) /\
+    st_deleted s' = st_deleted s.
+Proof using A EqDA.
+  rewrite /YjsState_insert => /bind_Some [newArr [Hsafe Heq]].
+  move: Heq => [= Hs']; subst s'.
+  have [_ Hint] := integrateSafe_ok input (st_items s) newArr Hsafe.
+  move: Hint; rewrite /integrate => /bind_Some [leftIdx [HfindLeft Hr1]].
+  move: Hr1 => /bind_Some [rightIdx [HfindRight Hr2]].
+  move: Hr2 => /bind_Some [destIdx [HfindIdx Hr3]].
+  move: Hr3 => /bind_Some [item [Hmk Hlast]].
+  move: Hlast => [= <-].
+  have [lptr [Hgl HLl]] := findLeftIdx_getElemExcept (st_items s) input leftIdx HfindLeft.
+  have [rptr [Hgr HRr]] := findRightIdx_getElemExcept (st_items s) input rightIdx HfindRight.
+  have Hitem : item = Item lptr rptr (in_id input) (in_content input).
+  { move: Hmk; rewrite /mkItemByIndex Hgl Hgr /= => [= H]; by rewrite H. }
+  have Htoitem : toItem input (st_items s) = Some item.
+  { apply/toItem_ok_iff; exists lptr, rptr, (in_id input), (in_content input).
+    rewrite Hitem; split_and!; [done | exact HLl | exact HRr | done | done]. }
+  exists item, destIdx; split_and!; [exact Htoitem | by rewrite Hitem | done | done].
 Qed.
 
 (** Membership is preserved by a single effect: inserts only add, deletes only
