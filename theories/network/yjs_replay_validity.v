@@ -647,4 +647,32 @@ Proof using A EqDA.
   exact: (isValidMessage_replay input (st_items state0) (st_items s) Huniq Hvalid0 Hpresent).
 Qed.
 
+(** The Yjs operation-replay validity, assembled. Insert messages are valid in
+    any causally-complete replay (by [isValidState_insert_from_source]); delete
+    messages are trivially valid. *)
+Definition YjsOperationReplayValidity (network : YjsOperationNetwork) :
+  OperationReplayValidity O YjsOV YjsWithId
+    (network_causal_order opid network) (NetStateSource network).
+Proof using A EqDA.
+  constructor => a s l Hsrc HsrcL Hlt Hcons Hclosed Heff Hnd.
+  destruct a as [input | id did].
+  - exact: (isValidState_insert_from_source network input s l Hsrc Hlt HsrcL Heff).
+  - exact I.
+Qed.
+
+(** **Yjs network strong eventual consistency** — the capstone: any two nodes of
+    a [YjsOperationNetwork] that have delivered the same set of operations reach
+    the same document, with no remaining hypotheses beyond the network
+    structure. (Port of [YjsOperationNetwork_converge'].) *)
+Theorem YjsOperationNetwork_converge_final (network : YjsOperationNetwork)
+    (i j : ClientId) (res0 res1 : YjsState A) :
+  effect_list O (toDeliverMessages network i) (op_init O) res0 ->
+  effect_list O (toDeliverMessages network j) (op_init O) res1 ->
+  (forall m, m ∈ toDeliverMessages network i <-> m ∈ toDeliverMessages network j) ->
+  res0 = res1.
+Proof using A EqDA.
+  exact: (YjsOperationNetwork_converge network i j res0 res1
+            (YjsOperationReplayValidity network)).
+Qed.
+
 End yjs_replay_validity.
