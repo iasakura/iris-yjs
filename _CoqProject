@@ -30,3 +30,4 @@ theories/algorithm/toitem_lemmas.v
 theories/algorithm/findptridx_insert.v
 theories/algorithm/insert_invariant.v
 theories/algorithm/insert_loop.v
+theories/algorithm/commutativity.v
