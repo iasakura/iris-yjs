@@ -8,7 +8,7 @@ From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
 From yjs.order Require Import item_order item_set_invariant.
-From yjs.network Require Import causal_order strong_causal_order.
+From yjs.network Require Import causal_order hb_closed strong_causal_order.
 From yjs.algorithm Require Import basic insert_basic invariant_basic
   invariant_yjsarray insert_loop delete commutativity.
 
@@ -76,7 +76,7 @@ Proof using A EqDA.
   - destruct Hvalid as [item [Htoitem Hvalid]].
     exact: (YjsStateInvariant_insert s s' input item Hinv Htoitem Hvalid Heff).
   - rewrite Heff; exact: (YjsStateInvariant_deleteById s did Hinv).
-Qed.
+Defined.
 
 (** Operations carry their id. *)
 Definition YjsWithId : @WithId YjsOperation YjsId := {| wid := YjsOperation_id |}.
@@ -112,6 +112,39 @@ Proof using A EqDA.
     move: Hdo => /bind_Some [m' [Hins Hdel]]; exists m'; split; [exact Hins | by injection Hdel].
   - (* delete / delete *)
     move=> [m [-> ->]]; exists (deleteById s bdid); split; [done | by rewrite deleteById_commutative].
+Qed.
+
+(** Concurrent commutativity holds whenever concurrent operations have distinct
+    client ids (the network's per-client-total-order discipline). *)
+Lemma yjs_concurrent_commutative (hb : @CausalOrder YjsOperation) (ops : list YjsOperation) :
+  (forall a b, a ∈ ops -> b ∈ ops -> hb_concurrent hb a b ->
+     clientId (YjsOperation_id a) <> clientId (YjsOperation_id b)) ->
+  concurrent_commutative YjsOp YjsOV hb ops.
+Proof using A EqDA.
+  move=> Hdisc a b s s' Ha Hb Hconc Hsinv Hva Hvb.
+  exact: (yjs_concurrent_commute a b s s' (Hdisc a b Ha Hb Hconc) Hsinv Hva Hvb).
+Qed.
+
+(** Yjs strong convergence: two histories of the same valid operation set (each
+    causally consistent / closed, with unique ids and distinct concurrent client
+    ids) reach the same document. Instantiates the generic
+    [hb_consistent_effect_convergent] with the Yjs commutativity. *)
+Theorem yjs_strong_convergence
+    (hb : @CausalOrder YjsOperation) (StateSource : YjsOperation -> Prop)
+    (RV : OperationReplayValidity YjsOp YjsOV YjsWithId hb StateSource)
+    (ops0 ops1 : list YjsOperation) (s : YjsState A) :
+  (forall x, x ∈ ops0 -> StateSource x) -> (forall x, x ∈ ops1 -> StateSource x) ->
+  hb_consistent hb ops0 -> hb_consistent hb ops1 -> hbClosed hb ops0 -> hbClosed hb ops1 ->
+  (forall a b, a ∈ ops0 -> b ∈ ops0 -> hb_concurrent hb a b ->
+     clientId (YjsOperation_id a) <> clientId (YjsOperation_id b)) ->
+  IdNoDup YjsWithId ops0 -> IdNoDup YjsWithId ops1 ->
+  (forall x, x ∈ ops0 <-> x ∈ ops1) ->
+  effect_list YjsOp ops0 (op_init YjsOp) s -> effect_list YjsOp ops1 (op_init YjsOp) s.
+Proof using A EqDA.
+  move=> Hsrc0 Hsrc1 Hc0 Hc1 Hcl0 Hcl1 Hdisc Hnd0 Hnd1 Hmem Heff.
+  apply: (hb_consistent_effect_convergent YjsOp YjsOV YjsWithId hb StateSource RV
+    ops0 ops1 s Hsrc0 Hsrc1 Hc0 Hc1 Hcl0 Hcl1 _ Hnd0 Hnd1 Hmem Heff).
+  exact: (yjs_concurrent_commutative hb ops0 Hdisc).
 Qed.
 
 End yjs_network.
