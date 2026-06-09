@@ -587,4 +587,64 @@ Proof using A EqDA.
     by rewrite Hdef1 Hdef2 Ho Hr Hidd1 Hidd2 Hcc1 Hcc2.
 Qed.
 
+(** From an insert op present in a replay, an item of its id is found in the
+    final state. *)
+Lemma effect_list_insert_mem (ops : list Op) (s0 s : YjsState A) (inO : IntegrateInput) :
+  effect_list O ops s0 s -> uniqueId (st_items s) -> OpInsert inO ∈ ops ->
+  exists it, item_id it = in_id inO /\ find_by_id (in_id inO) (st_items s) = Some it.
+Proof using A EqDA.
+  move=> Heff Huniq Hmem.
+  have [ops1 [ops2 Hsplit]] := list_elem_of_split _ _ Hmem.
+  move: Heff; rewrite Hsplit => /(effect_list_app O) [m [_ Hrest]].
+  move: Hrest => /(effect_list_cons O) [m' [Hop Heff2]].
+  have [it [Hid Hitmem]] := YjsState_insert_mem m m' inO Hop.
+  have Hitms := effect_list_preserves_mem ops2 m' s it Heff2 Hitmem.
+  exists it; split;
+    [exact Hid | exact: (find_by_id_of_mem_unique (st_items s) (in_id inO) it Huniq Hitms Hid)].
+Qed.
+
+(** The operation replay validity for inserts: an insert that is broadcast
+    somewhere is valid in any causally-complete replay of its predecessors.
+    Port of [isValidState_insert_from_source]. The broadcast-time validity
+    transports to the replay because the resolved origin items, being delivered
+    predecessors (so members of [l]), survive into [s] (with the same identity,
+    by [item_determinism]). *)
+Theorem isValidState_insert_from_source (network : YjsOperationNetwork)
+    (input : IntegrateInput) (s : YjsState A) (l : list Op) :
+  (exists k, EvBroadcast (OpInsert input) ∈ histories network k) ->
+  (forall x, co_lt (network_causal_order opid network) x (OpInsert input) -> x ∈ l) ->
+  (forall x, x ∈ l -> exists k, EvBroadcast x ∈ histories network k) ->
+  effect_list O l (op_init O) s ->
+  exists item, toItem input (st_items s) = Some item /\ IsItemValid item.
+Proof using A EqDA.
+  move=> [j Hbc] Hlt Hsrc Heff.
+  have [preHist [postHist Hhist0]] := list_elem_of_split _ _ Hbc.
+  have Hhist : histories network j = preHist ++ [EvBroadcast (OpInsert input)] ++ postHist
+    by rewrite Hhist0.
+  have [state0 [Hinterp Hvalid0]] :=
+    broadcast_only_valid_messages opid O YjsIsValidMessage network j (OpInsert input)
+      preHist postHist Hhist.
+  have Huniq := effect_list_uniqueId_init l s Heff.
+  have HsrcPre : forall x : Op, x ∈ omap deliverP preHist ->
+      exists k, EvBroadcast x ∈ histories network k.
+  { move=> x; rewrite list_elem_of_omap => -[ev [Hev Hdel]].
+    destruct ev as [a | a]; simpl in Hdel; [done | injection Hdel as ->].
+    have HxHist : EvDeliver x ∈ histories network j by rewrite Hhist; set_solver.
+    exact: (deliver_has_a_cause opid network j x HxHist). }
+  have Hpresent : forall oid oit, find_by_id oid (st_items state0) = Some oit ->
+      oit ∈ st_items s.
+  { move=> oid oit Hfind0.
+    have [inO [HmemOmap Hidin]] :=
+      effect_list_find_insert (omap deliverP preHist) state0 oid oit Hinterp Hfind0.
+    have HdelP := deliver_insert_mem_omap preHist inO HmemOmap.
+    have Hltpred := pre_deliver_lt_insert network j preHist postHist inO input Hhist HdelP.
+    have HinL : OpInsert inO ∈ l := Hlt (OpInsert inO) Hltpred.
+    have [it [Hidit Hfinds]] := effect_list_insert_mem l (op_init O) s inO Heff Huniq HinL.
+    have Hfinds' : find_by_id oid (st_items s) = Some it by rewrite -Hidin.
+    have Hdet := item_determinism network oit it (omap deliverP preHist) l state0 s oid
+      HsrcPre Hsrc Hinterp Heff Hfind0 Hfinds'.
+    rewrite Hdet; exact: (@find_by_id_mem _ EqDA oid (st_items s) it Hfinds'). }
+  exact: (isValidMessage_replay input (st_items state0) (st_items s) Huniq Hvalid0 Hpresent).
+Qed.
+
 End yjs_replay_validity.
