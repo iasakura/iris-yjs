@@ -32,3 +32,4 @@ theories/algorithm/insert_invariant.v
 theories/algorithm/insert_loop.v
 theories/algorithm/commutativity.v
 theories/algorithm/delete.v
+theories/network/yjs_network.v
