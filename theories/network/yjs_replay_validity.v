@@ -86,6 +86,89 @@ Proof using A EqDA.
   exists item, destIdx; split_and!; [exact Htoitem | by rewrite Hitem | done | done].
 Qed.
 
+(** A successful by-id resolution lands at a valid list index. *)
+Lemma find_idx_bounds (id : YjsId) (arr : list (YjsItem A)) (idx : Z) :
+  (Z.of_nat <$> (fst <$> list_find (fun item => item_id item = id) arr)) = Some idx ->
+  (0 <= idx)%Z /\ (idx < Z.of_nat (length arr))%Z.
+Proof using A EqDA.
+  move=> /fmap_Some [n [Hn Hidxeq]].
+  move: Hn => /fmap_Some [[i x] [Hfind Hneq]].
+  move: Hfind => /list_find_Some [Hlook _].
+  have Hi := lookup_lt_Some _ _ _ Hlook.
+  simpl in Hneq; subst n idx; split; lia.
+Qed.
+
+Lemma findLeftIdx_ge (oid : option YjsId) (arr : list (YjsItem A)) (leftIdx : Z) :
+  findLeftIdx oid arr = Some leftIdx -> (-1 <= leftIdx)%Z.
+Proof using A EqDA.
+  rewrite /findLeftIdx; destruct oid as [id|].
+  - by move=> /(find_idx_bounds id arr leftIdx) [? ?]; lia.
+  - move=> [= <-]; lia.
+Qed.
+
+Lemma findLeftIdx_lt_size (oid : option YjsId) (arr : list (YjsItem A)) (leftIdx : Z) :
+  findLeftIdx oid arr = Some leftIdx -> (leftIdx < Z.of_nat (length arr))%Z.
+Proof using A EqDA.
+  rewrite /findLeftIdx; destruct oid as [id|].
+  - by move=> /(find_idx_bounds id arr leftIdx) [_ ?].
+  - move=> [= <-]; lia.
+Qed.
+
+Lemma findRightIdx_le_size (rid : option YjsId) (arr : list (YjsItem A)) (rightIdx : Z) :
+  findRightIdx rid arr = Some rightIdx -> (rightIdx <= Z.of_nat (length arr))%Z.
+Proof using A EqDA.
+  rewrite /findRightIdx; destruct rid as [id|].
+  - by move=> /(find_idx_bounds id arr rightIdx) [_ ?]; lia.
+  - move=> [= <-]; lia.
+Qed.
+
+(** The integrated index lands in bounds (so the splice is non-trivial): this
+    uses only the index bounds of [leftIdx] / [rightIdx], never item validity.
+    (Port of [findIntegratedIndex_ok_le_size_from_eq].) *)
+Lemma findIntegratedIndex_le_size (leftIdx rightIdx : Z) (input : IntegrateInput)
+    (arr : list (YjsItem A)) (d : nat) :
+  (-1 <= leftIdx)%Z -> (leftIdx < Z.of_nat (length arr))%Z ->
+  (rightIdx <= Z.of_nat (length arr))%Z ->
+  findIntegratedIndex leftIdx rightIdx input arr = Some d ->
+  (d <= length arr)%nat.
+Proof using A EqDA.
+  move=> Hge Hlt Hrle.
+  rewrite /findIntegratedIndex => /bind_Some [z [Hloop [= <-]]].
+  destruct (decide (leftIdx < rightIdx)%Z) as [Hlr | Hlr].
+  - have [_ Hzr] := fii_loop_bounds (Z.to_nat (rightIdx - leftIdx) - 1) 1 leftIdx rightIdx
+      (clientId (in_id input)) arr false (leftIdx + 1) z Hge ltac:(lia) ltac:(lia) ltac:(lia) Hloop.
+    lia.
+  - have Hcount : (Z.to_nat (rightIdx - leftIdx) - 1 = 0)%nat by lia.
+    rewrite Hcount /= in Hloop.
+    move: Hloop => [= <-]; lia.
+Qed.
+
+(** A successful insert actually places an item of the input's id in the result
+    (the splice is in-bounds). *)
+Lemma YjsState_insert_mem (s s' : YjsState A) (input : IntegrateInput) :
+  YjsState_insert s input = Some s' ->
+  exists it, item_id it = in_id input /\ it ∈ st_items s'.
+Proof using A EqDA.
+  rewrite /YjsState_insert => /bind_Some [newArr [Hsafe Heq]].
+  move: Heq => [= Hs']; subst s'.
+  have [_ Hint] := integrateSafe_ok input (st_items s) newArr Hsafe.
+  move: Hint; rewrite /integrate => /bind_Some [leftIdx [HfindLeft Hr1]].
+  move: Hr1 => /bind_Some [rightIdx [HfindRight Hr2]].
+  move: Hr2 => /bind_Some [destIdx [HfindIdx Hr3]].
+  move: Hr3 => /bind_Some [item [Hmk Hlast]].
+  move: Hlast => [= <-].
+  have [lptr [Hgl _]] := findLeftIdx_getElemExcept (st_items s) input leftIdx HfindLeft.
+  have [rptr [Hgr _]] := findRightIdx_getElemExcept (st_items s) input rightIdx HfindRight.
+  have Hitem : item = Item lptr rptr (in_id input) (in_content input)
+    by move: Hmk; rewrite /mkItemByIndex Hgl Hgr /= => [= H]; rewrite H.
+  have Hbound : (destIdx <= length (st_items s))%nat
+    by apply: (findIntegratedIndex_le_size leftIdx rightIdx input (st_items s) destIdx
+      (findLeftIdx_ge _ _ _ HfindLeft) (findLeftIdx_lt_size _ _ _ HfindLeft)
+      (findRightIdx_le_size _ _ _ HfindRight) HfindIdx).
+  exists item; split; [by rewrite Hitem | ].
+  apply: (proj2 (mem_insertIdxIfInBounds (st_items s) item item destIdx Hbound)); by left.
+Qed.
+
 (** Membership is preserved by a single effect: inserts only add, deletes only
     tombstone. *)
 Lemma effect_preserves_mem (op : Op) (s s' : YjsState A) (item : YjsItem A) :
