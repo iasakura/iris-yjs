@@ -19,3 +19,9 @@ theories/algorithm/basic.v
 theories/algorithm/insert_basic.v
 theories/algorithm/invariant_basic.v
 theories/algorithm/invariant_yjsarray.v
+theories/algorithm/invariant_yjsarray_idx.v
+theories/algorithm/insert_lemmas.v
+theories/algorithm/findptridx_order.v
+theories/algorithm/findptridx_order2.v
+theories/algorithm/findptridx_getelem.v
+theories/algorithm/findptridx_origin.v
