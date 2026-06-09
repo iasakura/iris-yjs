@@ -19,6 +19,7 @@ Context {A : Type} `{EqDA : EqDecision A}.
 
 Local Notation Op := (@YjsOperation A).
 Local Notation O := (@YjsOp A EqDA).
+Local Notation opid := (@YjsOperation_id A).
 
 (** An [integrate] always returns the input array with one item (of the input's
     id) spliced in at some index. *)
@@ -325,6 +326,76 @@ Proof using A EqDA.
   apply: (find_by_id_of_mem_unique s oid oit Huniq).
   - exact: (Hpresent oid oit Hfind0).
   - exact: (@find_by_id_id _ EqDA oid state0 oit Hfind0).
+Qed.
+
+(** An operation delivered in the broadcaster's prefix strictly happens-before
+    the operation broadcast there: their deliver / broadcast events are locally
+    ordered. (Port of [pre_deliver_lt_insert] / [dep_insert_lt_target].) *)
+Lemma pre_deliver_lt_insert (network : YjsOperationNetwork) (i : ClientId)
+    (pre post : list Event) (x input : IntegrateInput) :
+  histories network i = pre ++ [EvBroadcast (OpInsert input)] ++ post ->
+  EvDeliver (OpInsert x) ∈ pre ->
+  co_lt (network_causal_order opid network) (OpInsert x) (OpInsert input).
+Proof using A EqDA.
+  move=> Hhist Hmem.
+  have [l1 [l2 Hpre]] := list_elem_of_split _ _ Hmem.
+  have Hlo : locallyOrdered network i (EvDeliver (OpInsert x)) (EvBroadcast (OpInsert input))
+    by exists l1, l2, post; rewrite Hhist Hpre -!app_assoc.
+  have Hhb : HappensBefore opid network (OpInsert x) (OpInsert input)
+    := hb_db opid network i (OpInsert x) (OpInsert input) Hlo.
+  split.
+  - by right.
+  - move=> Heq; rewrite Heq in Hhb.
+    exact: (HappensBefore_asymm opid network (OpInsert input) (OpInsert input) Hhb Hhb).
+Qed.
+
+(** A happens-before predecessor of the last operation of an [hbClosed] list
+    sits in the prefix before it. (Port of [hbClosed_predecessor_in_prefix].) *)
+Lemma hbClosed_predecessor_in_prefix (hb : @CausalOrder Op)
+    (l l' l'' : list Op) (dep target : Op) :
+  hbClosed hb l ->
+  l = l' ++ [target] ++ l'' ->
+  co_lt hb dep target ->
+  dep ∈ l'.
+Proof using A. move=> Hclosed Hsplit Hlt; exact: (Hclosed target dep l' l'' Hsplit Hlt). Qed.
+
+(** A by-id lookup is functional. (Port of [prefix_find_exact_by_id].) *)
+Lemma prefix_find_exact_by_id (s : list (YjsItem A)) (oid : YjsId) (item item' : YjsItem A) :
+  find_by_id oid s = Some item -> find_by_id oid s = Some item' -> item' = item.
+Proof using A. move=> Hf Hf'; rewrite Hf in Hf'; by injection Hf'. Qed.
+
+(** A delivered insert in a history reflects a member of its delivered ops. *)
+Lemma deliver_insert_mem_omap (h : list Event) (z : IntegrateInput (A := A)) :
+  OpInsert z ∈ omap deliverP h -> EvDeliver (OpInsert z) ∈ h.
+Proof using A.
+  rewrite list_elem_of_omap => -[ev [Hev Hdel]].
+  destruct ev as [a | a]; simpl in Hdel; [done | injection Hdel as ->; exact Hev].
+Qed.
+
+(** The origin / right-origin ids that [toItem] resolves against a broadcaster's
+    prefix state were themselves delivered (as inserts) earlier in that prefix.
+    (Port of [dep_ids_exist_in_source_prefix].) *)
+Lemma dep_ids_exist_in_source_prefix (op : IntegrateInput) (preHist : list Event)
+    (s : YjsState A) (item : YjsItem A) :
+  interpHistory O preHist (op_init O) s ->
+  toItem op (st_items s) = Some item ->
+  (match in_originId op with None => True
+    | Some oid => exists o, EvDeliver (OpInsert o) ∈ preHist /\ in_id o = oid end) /\
+  (match in_rightOriginId op with None => True
+    | Some rid => exists r, EvDeliver (OpInsert r) ∈ preHist /\ in_id r = rid end).
+Proof using A EqDA.
+  move=> Hinterp Htoitem.
+  have [o' [r' [id' [c' [_ [HoL [HoR _]]]]]]] :=
+    proj1 (toItem_ok_iff op (st_items s) item) Htoitem.
+  split.
+  - move: HoL; rewrite /isLeftIdPtr; destruct (in_originId op) as [oid|]; last done.
+    move=> [oit [_ Hfind]].
+    have [inO [Hmem Hid]] := effect_list_find_insert (omap deliverP preHist) s oid oit Hinterp Hfind.
+    exists inO; split; [exact: (deliver_insert_mem_omap preHist inO Hmem) | exact Hid].
+  - move: HoR; rewrite /isRightIdPtr; destruct (in_rightOriginId op) as [rid|]; last done.
+    move=> [rit [_ Hfind]].
+    have [inR [Hmem Hid]] := effect_list_find_insert (omap deliverP preHist) s rid rit Hinterp Hfind.
+    exists inR; split; [exact: (deliver_insert_mem_omap preHist inR Hmem) | exact Hid].
 Qed.
 
 End yjs_replay_validity.
