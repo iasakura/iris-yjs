@@ -31,3 +31,4 @@ theories/algorithm/findptridx_insert.v
 theories/algorithm/insert_invariant.v
 theories/algorithm/insert_loop.v
 theories/algorithm/commutativity.v
+theories/algorithm/delete.v
