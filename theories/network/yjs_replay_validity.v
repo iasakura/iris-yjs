@@ -10,7 +10,7 @@ From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
 From yjs.algorithm Require Import basic insert_basic invariant_yjsarray
-  insert_invariant insert_loop delete commutativity.
+  toitem_lemmas insert_invariant insert_loop delete commutativity.
 From yjs.network Require Import causal_order hb_closed strong_causal_order
   causal_network operation_network yjs_network yjs_operation_network.
 
@@ -176,6 +176,56 @@ Lemma effect_list_uniqueId_init (ops : list Op) (s : YjsState A) :
   effect_list O ops (op_init O) s -> uniqueId (st_items s).
 Proof using A EqDA.
   apply: (effect_list_uniqueId ops (op_init O) s); rewrite /uniqueId /=; constructor.
+Qed.
+
+(** A single effect only adds items via an insert: every item in the result is
+    either already in the source or is the item just inserted (whose id is the
+    input's id). *)
+Lemma effect_step_mem_src (op : Op) (s s' : YjsState A) (item : YjsItem A) :
+  op_effect O op s s' -> item ∈ st_items s' ->
+  item ∈ st_items s \/ (exists input, op = OpInsert input /\ in_id input = item_id item).
+Proof using A EqDA.
+  destruct op as [input | id did]; simpl.
+  - move=> Hins Hmem.
+    have [didx [it [Hid [Hitems _]]]] := YjsState_insert_insertIdx_form s s' input Hins.
+    rewrite Hitems in Hmem.
+    case: (decide (didx <= length (st_items s))%nat) => Hd.
+    + move: Hmem; rewrite (mem_insertIdxIfInBounds (st_items s) it item didx Hd) => -[Heq | Hin].
+      * right; exists input; split; [done | by rewrite Heq Hid].
+      * by left.
+    + left; move: Hmem; by rewrite /insertIdxIfInBounds (decide_False _ _ Hd).
+  - by move=> -> Hmem; left.
+Qed.
+
+(** Tracing an item in a replayed state back to its origin: it was either in the
+    initial state, or it was contributed by a delivered insert in the list. *)
+Lemma effect_list_mem_src (ops : list Op) (s0 s : YjsState A) (item : YjsItem A) :
+  effect_list O ops s0 s -> item ∈ st_items s ->
+  item ∈ st_items s0 \/ (exists input, OpInsert input ∈ ops /\ in_id input = item_id item).
+Proof using A EqDA.
+  elim: ops s0 s => [|op ops IH] s0 s.
+  - by move=> /(effect_list_nil O) <- Hmem; left.
+  - move=> /(effect_list_cons O) [m [Hop Hrest]] Hmem.
+    case: (IH m s Hrest Hmem) => [Hin | [input [Hmem' Hid]]].
+    + case: (effect_step_mem_src op s0 m item Hop Hin) => [Hin0 | [input [Hopeq Hid]]].
+      * by left.
+      * right; exists input; split; [rewrite Hopeq elem_of_cons; by left | exact Hid].
+    + right; exists input; split; [rewrite elem_of_cons; by right | exact Hid].
+Qed.
+
+(** Replaying from the empty state: every item found by id was delivered by an
+    insert with that id. (Relational analogue of [effect_list_find?_exists_insert_id].) *)
+Lemma effect_list_find_insert (ops : list Op) (s : YjsState A) (id : YjsId) (item : YjsItem A) :
+  effect_list O ops (op_init O) s ->
+  find_by_id id (st_items s) = Some item ->
+  exists input, OpInsert input ∈ ops /\ in_id input = id.
+Proof using A EqDA.
+  move=> Heff Hfind.
+  have Hmem : item ∈ st_items s := @find_by_id_mem _ EqDA id (st_items s) item Hfind.
+  have Hidit : item_id item = id := @find_by_id_id _ EqDA id (st_items s) item Hfind.
+  case: (effect_list_mem_src ops (op_init O) s item Heff Hmem) => [Hin0 | [input [Hop Hin]]].
+  - by move: Hin0; rewrite /= elem_of_nil.
+  - exists input; split; [exact Hop | by rewrite Hin Hidit].
 Qed.
 
 End yjs_replay_validity.
