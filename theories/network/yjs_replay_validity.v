@@ -10,7 +10,7 @@ From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
 From yjs Require Import client_id item item_set.
 From yjs.algorithm Require Import basic insert_basic invariant_yjsarray
-  insert_loop delete commutativity.
+  insert_invariant insert_loop delete commutativity.
 From yjs.network Require Import causal_order hb_closed strong_causal_order
   causal_network operation_network yjs_network yjs_operation_network.
 
@@ -104,5 +104,78 @@ Qed.
 Lemma uniqueId_deleteById (s : YjsState A) (did : YjsId) :
   uniqueId (st_items s) -> uniqueId (st_items (deleteById s did)).
 Proof using A. by []. Qed.
+
+(** Clock safety forces the new id to differ from every existing id. *)
+Lemma isClockSafe_id_neq (id : YjsId) (arr : list (YjsItem A)) (x : YjsItem A) :
+  isClockSafe id arr = true -> x ∈ arr -> item_id x <> id.
+Proof using A EqDA.
+  rewrite /isClockSafe => Hcs Hx Heq.
+  have Hf : Forall (fun item => Is_true (implb (bool_decide (clientId (item_id item) = clientId id))
+      (bool_decide (clock (item_id item) < clock id)))) arr
+    by apply/forallb_True; rewrite Hcs.
+  move: Hf => /Forall_forall Hf.
+  have Hgx := Hf x Hx.
+  have HP1 : bool_decide (clientId (item_id x) = clientId id) = true
+    by apply bool_decide_eq_true; rewrite Heq.
+  rewrite HP1 /= in Hgx.
+  move: Hgx => /Is_true_eq_true /bool_decide_eq_true Hclk.
+  rewrite Heq in Hclk; lia.
+Qed.
+
+(** A successful insert is clock-safe in the source state. *)
+Lemma YjsState_insert_isClockSafe (s s' : YjsState A) (input : IntegrateInput) :
+  YjsState_insert s input = Some s' -> isClockSafe (in_id input) (st_items s) = true.
+Proof using A EqDA.
+  rewrite /YjsState_insert => /bind_Some [newArr [Hsafe _]].
+  by have [Hcs _] := integrateSafe_ok input (st_items s) newArr Hsafe.
+Qed.
+
+(** Inserting a clock-safe item preserves id-uniqueness: the new id (the input's
+    id) is distinct from every present id, so the splice keeps ids pairwise
+    distinct. *)
+Lemma insert_preserves_uniqueId (s s' : YjsState A) (input : IntegrateInput) :
+  uniqueId (st_items s) -> YjsState_insert s input = Some s' -> uniqueId (st_items s').
+Proof using A EqDA.
+  move=> Huniq Hins.
+  have Hcs := YjsState_insert_isClockSafe s s' input Hins.
+  have [didx [item [Hid [Hitems _]]]] := YjsState_insert_insertIdx_form s s' input Hins.
+  rewrite Hitems /uniqueId /insertIdxIfInBounds.
+  case: (decide (didx <= length (st_items s))%nat) => Hd; last exact: Huniq.
+  apply: StronglySorted_insert => //.
+  - move=> j y _ Hj; rewrite Hid.
+    exact: (isClockSafe_id_neq (in_id input) (st_items s) y Hcs
+              (list_elem_of_lookup_2 _ _ _ Hj)).
+  - move=> j y _ Hj; rewrite Hid => Heq.
+    exact: (isClockSafe_id_neq (in_id input) (st_items s) y Hcs
+              (list_elem_of_lookup_2 _ _ _ Hj) (eq_sym Heq)).
+Qed.
+
+(** A single effect preserves id-uniqueness. *)
+Lemma effect_uniqueId (op : Op) (s s' : YjsState A) :
+  uniqueId (st_items s) -> op_effect O op s s' -> uniqueId (st_items s').
+Proof using A EqDA.
+  destruct op as [input | id did]; simpl.
+  - move=> Hu Hins; exact: insert_preserves_uniqueId s s' input Hu Hins.
+  - move=> Hu ->; exact: uniqueId_deleteById s did Hu.
+Qed.
+
+(** Replaying effects preserves id-uniqueness. *)
+Lemma effect_list_uniqueId (ops : list Op) (s0 s : YjsState A) :
+  uniqueId (st_items s0) -> effect_list O ops s0 s -> uniqueId (st_items s).
+Proof using A EqDA.
+  elim: ops s0 s => [|op ops IH] s0 s Hu.
+  - by move=> /(effect_list_nil O) <-.
+  - move=> /(effect_list_cons O) [m [Hop Hrest]].
+    apply: (IH m s _ Hrest); exact: effect_uniqueId op s0 m Hu Hop.
+Qed.
+
+(** Any document reachable by replaying from the empty state has unique ids
+    (each insert is clock-safe, so no two ids coincide). The Lean version takes
+    [IdNoDup] as a hypothesis; here it is unnecessary. *)
+Lemma effect_list_uniqueId_init (ops : list Op) (s : YjsState A) :
+  effect_list O ops (op_init O) s -> uniqueId (st_items s).
+Proof using A EqDA.
+  apply: (effect_list_uniqueId ops (op_init O) s); rewrite /uniqueId /=; constructor.
+Qed.
 
 End yjs_replay_validity.
