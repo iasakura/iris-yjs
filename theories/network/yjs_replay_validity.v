@@ -259,4 +259,42 @@ Proof using A EqDA.
   - by [].
 Qed.
 
+(** In an id-unique list, a present item is exactly what a by-id lookup returns:
+    there is no earlier item sharing its id. *)
+Lemma find_by_id_of_mem_unique (s : list (YjsItem A)) (oid : YjsId) (oit : YjsItem A) :
+  uniqueId s -> oit ∈ s -> item_id oit = oid -> find_by_id oid s = Some oit.
+Proof using A EqDA.
+  move=> Huniq Hmem Hid.
+  rewrite /find_by_id.
+  have [[i y] Hfind] : is_Some (list_find (fun item => item_id item = oid) s)
+    by apply: (list_find_elem_of _ _ oit Hmem); exact Hid.
+  rewrite Hfind /=.
+  move: Hfind => /list_find_Some [Hlook [Hpy _]].
+  have Hymem : y ∈ s := list_elem_of_lookup_2 _ _ _ Hlook.
+  have Hyeq : y = oit
+    by apply: (uniqueId_id_eq_implies_eq s Huniq y oit Hymem Hmem); rewrite Hpy Hid.
+  by rewrite Hyeq.
+Qed.
+
+(** The clean reduction of insert-validity replay: given the message was valid
+    at broadcast time ([toItem state0] resolves to a valid item) and every item
+    its by-id resolution touched is still present in the replayed state [s]
+    (which is id-unique), the message is valid in [s]. The remaining (deep)
+    obligation is exactly the presence hypothesis — that [insert]'s origin /
+    right-origin items, being causal predecessors, survive into [s] — which is
+    what [toItem_prefix_invariant] establishes from the network structure. *)
+Lemma isValidMessage_replay (input : IntegrateInput) (state0 s : list (YjsItem A)) :
+  uniqueId s ->
+  (exists item0, toItem input state0 = Some item0 /\ IsItemValid item0) ->
+  (forall oid oit, find_by_id oid state0 = Some oit -> oit ∈ s) ->
+  exists item, toItem input s = Some item /\ IsItemValid item.
+Proof using A EqDA.
+  move=> Huniq [item0 [Ht0 Hvalid]] Hpresent.
+  apply: (toItem_isValid_transport input state0 s item0 Ht0 Hvalid).
+  move=> oid oit Hfind0.
+  apply: (find_by_id_of_mem_unique s oid oit Huniq).
+  - exact: (Hpresent oid oit Hfind0).
+  - exact: (@find_by_id_id _ EqDA oid state0 oit Hfind0).
+Qed.
+
 End yjs_replay_validity.
