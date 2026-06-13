@@ -1,0 +1,6 @@
+(include_subdirs qualified)
+
+(rocq.theory
+ (name yjs)
+ (package rocq-yjs)
+ (theories stdpp iris yjs.crdt))

@@ -1,0 +1,25 @@
+opam-version: "2.0"
+synopsis: "Verified Yjs CRDT: total order, integrate correctness, network convergence, indirect equivalence"
+description: """
+The Yjs-specific development built on rocq-yjs-core: the Yjs item total-order
+theory, the integrate algorithm and its document-invariant / commutativity
+proofs, the Yjs operation-network strong eventual consistency (instantiating the
+core framework), and the indirect (by-id) representation with its equivalence to
+the verified direct algorithm."""
+maintainer: "iasakura <i.asakura58@gmail.com>"
+authors: "iasakura <i.asakura58@gmail.com>"
+license: "MIT"
+homepage: "https://github.com/iasakura/iris-yjs"
+dev-repo: "git+https://github.com/iasakura/iris-yjs.git"
+bug-reports: "https://github.com/iasakura/iris-yjs/issues"
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+]
+depends: [
+  "dune" {>= "3.8"}
+  "rocq-yjs-core" {= version}
+  "rocq-core" {>= "9.1" & < "9.3"}
+  "rocq-stdpp" {>= "1.12"}
+  "rocq-iris" {>= "4.4"}
+]
