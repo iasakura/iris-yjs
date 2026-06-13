@@ -177,6 +177,7 @@ Record OperationReplayValidity (OV : OperationValidity) (W : WithId)
   isValidState_of_history :
     forall (a : A) (s : St) (l : list A),
       StateSource a ->
+      (forall x, x ∈ l -> StateSource x) ->
       (forall x, co_lt hb x a -> x ∈ l) ->
       hb_consistent hb l ->
       hbClosed hb l ->
@@ -239,6 +240,7 @@ Proof.
     have Hva : isValidState OV a m.
     { apply: (isValidState_of_history _ _ _ _ RV a m ops).
       - apply: Hsrc; rewrite elem_of_app elem_of_cons; by right; left.
+      - exact: Hsrc'.
       - exact: (hbClosed_pred_last _ _ _ Hclosed).
       - exact: Hcons'.
       - exact: Hclosed'.
@@ -277,11 +279,13 @@ Proof.
     { apply: (isValidState_of_history _ _ _ _ RV a m ops0);
         try by [exact: Hcons0 | exact: Hclosed0 | exact: Hpre | exact: Hnd0].
       - apply: Hsrc; rewrite elem_of_app elem_of_cons; by right; left.
+      - exact: Hsrc0.
       - move=> x Hlt; exact: (Hclosed a x ops0 (b :: ops1) eq_refl Hlt). }
     have Hvb : isValidState OV b m.
     { apply: (isValidState_of_history _ _ _ _ RV b m ops0);
         try by [exact: Hcons0 | exact: Hclosed0 | exact: Hpre | exact: Hnd0].
       - apply: Hsrc; rewrite elem_of_app !elem_of_cons; by right; right; left.
+      - exact: Hsrc0.
       - move=> x Hlt.
         have Hx : x ∈ ops0 ++ [a]
           by apply: (Hclosed b x (ops0 ++ [a]) ops1 _ Hlt); rewrite -app_assoc.
@@ -456,11 +460,13 @@ Proof.
           { apply: (isValidState_of_history _ _ _ _ _ RV a n (ops0f ++ ops0l));
               try by [exact: Hpred_a | exact: Hcccore | exact: Hclcore
                      | exact: Hn | exact: Hndcore].
-            apply: Hsrc0; set_solver. }
+            - apply: Hsrc0; set_solver.
+            - exact: Hsrccore. }
           have Hvb : isValidState O OV b n.
           { apply: (isValidState_of_history _ _ _ _ _ RV b n (ops0f ++ ops0l));
               try by [exact: Hcccore | exact: Hclcore | exact: Hn | exact: Hndcore].
             - apply: Hsrc0; set_solver.
+            - exact: Hsrccore.
             - move=> x Hlt.
               have Hx : x ∈ ops0f := Hcl0' b x ops0f (ops0l ++ [a]) eq_refl Hlt.
               rewrite elem_of_app; by left. }
