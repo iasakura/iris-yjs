@@ -1,0 +1,23 @@
+opam-version: "2.0"
+synopsis: "Reusable CRDT convergence framework (Rocq)"
+description: """
+The Yjs-independent CRDT convergence framework: causal order, hb-closed lists,
+strong causal order, and the causal/operation network models with their strong
+eventual consistency results. Depends only on stdpp (no Iris, no HeapLang, and
+no Yjs item/order theory). Intended for reuse by downstream CRDT developments
+(e.g. other CRDTs such as OR-sets, and cert-yjs)."""
+maintainer: "iasakura <i.asakura58@gmail.com>"
+authors: "iasakura <i.asakura58@gmail.com>"
+license: "MIT"
+homepage: "https://github.com/iasakura/iris-yjs"
+dev-repo: "git+https://github.com/iasakura/iris-yjs.git"
+bug-reports: "https://github.com/iasakura/iris-yjs/issues"
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+]
+depends: [
+  "dune" {>= "3.8"}
+  "rocq-core" {>= "9.1" & < "9.3"}
+  "rocq-stdpp" {>= "1.12"}
+]
