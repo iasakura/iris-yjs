@@ -3,4 +3,4 @@
 (rocq.theory
  (name yjs.crdt)
  (package rocq-yjs-core)
- (theories stdpp))
+ (theories Stdlib stdpp))
