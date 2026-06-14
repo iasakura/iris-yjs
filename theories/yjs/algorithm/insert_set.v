@@ -140,6 +140,93 @@ Proof using A EqDA.
   - by move=> ->.
 Qed.
 
+(** Branch correspondence: the set loop's left-origin id test matches
+    [fii_loop]'s [oLeftIdx = leftIdx] test (origin_id is injective on origins,
+    which are never [Last], so equal ids give equal indices). *)
+Lemma branch_left_corr (arr : list (YjsItem A)) (newItem : YjsItem A)
+    (input : IntegrateInput (A := A)) (leftIdx : Z) (other : YjsItem A) (oLeftIdx : Z) :
+  YjsArrInvariant arr ->
+  IsClosedItemSet (ArrSet (newItem :: arr)) ->
+  ItemSetInvariant (ArrSet (newItem :: arr)) ->
+  toItem input arr = Some newItem ->
+  findPtrIdx (origin newItem) arr = Some leftIdx ->
+  other ∈ arr ->
+  findPtrIdx (origin other) arr = Some oLeftIdx ->
+  (origin_id (origin other) = in_originId input <-> oLeftIdx = leftIdx).
+Proof using A EqDA.
+  move=> Harr Hclosed Hinv Htoitem HfindL Hmem HoL.
+  rewrite -(in_originId_origin_id arr newItem input Htoitem).
+  have Hpo : ArrSet (newItem :: arr) (itemPtr other) := arrset_mem arr newItem other Hmem.
+  have Hpn : ArrSet (newItem :: arr) (itemPtr newItem) := arrset_new arr newItem.
+  have Honl : origin other <> Last.
+  { move=> HL; have [h Hlt] := item_origin_lt other; move: Hlt; rewrite HL => Hlt.
+    exact: (not_last_lt_ptr Hclosed Hinv h (itemPtr other) Hpo Hlt). }
+  have Hnnl : origin newItem <> Last.
+  { move=> HL; have [h Hlt] := item_origin_lt newItem; move: Hlt; rewrite HL => Hlt.
+    exact: (not_last_lt_ptr Hclosed Hinv h (itemPtr newItem) Hpn Hlt). }
+  split.
+  - move=> Hoid.
+    have Hoeq : origin other = origin newItem.
+    { destruct (origin other) as [it1| |] eqn:Hoo, (origin newItem) as [it2| |] eqn:Hon;
+        rewrite /origin_id /= in Hoid;
+        try discriminate Hoid;
+        try (exfalso; (apply Honl + apply Hnnl); reflexivity);
+        try reflexivity.
+      injection Hoid as Hidd.
+      have Hit1 : ArrSet (newItem :: arr) (itemPtr it1) :=
+        push_subset arr newItem (itemPtr it1) (findPtrIdx_ArrSet arr (itemPtr it1) oLeftIdx HoL).
+      have Hit2 : ArrSet (newItem :: arr) (itemPtr it2) :=
+        push_subset arr newItem (itemPtr it2) (findPtrIdx_ArrSet arr (itemPtr it2) leftIdx HfindL).
+      by rewrite (id_unique (ArrSet (newItem :: arr)) Hinv it1 it2 Hidd Hit1 Hit2). }
+    rewrite Hoeq in HoL; congruence.
+  - move=> Heq; subst oLeftIdx.
+    have Hoeq : origin other = origin newItem :=
+      findPtrIdx_eq_ok_inj arr (origin other) (origin newItem) leftIdx HoL HfindL.
+    by rewrite Hoeq.
+Qed.
+
+Lemma branch_right_corr (arr : list (YjsItem A)) (newItem : YjsItem A)
+    (input : IntegrateInput (A := A)) (rightIdx : Z) (other : YjsItem A) (oRightIdx : Z) :
+  YjsArrInvariant arr ->
+  IsClosedItemSet (ArrSet (newItem :: arr)) ->
+  ItemSetInvariant (ArrSet (newItem :: arr)) ->
+  toItem input arr = Some newItem ->
+  findPtrIdx (rightOrigin newItem) arr = Some rightIdx ->
+  other ∈ arr ->
+  findPtrIdx (rightOrigin other) arr = Some oRightIdx ->
+  (origin_id (rightOrigin other) = in_rightOriginId input <-> oRightIdx = rightIdx).
+Proof using A EqDA.
+  move=> Harr Hclosed Hinv Htoitem HfindR Hmem HoR.
+  rewrite -(in_rightOriginId_rightOrigin_id arr newItem input Htoitem).
+  have Hpo : ArrSet (newItem :: arr) (itemPtr other) := arrset_mem arr newItem other Hmem.
+  have Hpn : ArrSet (newItem :: arr) (itemPtr newItem) := arrset_new arr newItem.
+  have Honf : rightOrigin other <> First.
+  { move=> HF; have [h Hlt] := item_lt_rightOrigin other; move: Hlt; rewrite HF => Hlt.
+    exact: (not_ptr_lt_first Hclosed Hinv h (itemPtr other) Hpo Hlt). }
+  have Hnnf : rightOrigin newItem <> First.
+  { move=> HF; have [h Hlt] := item_lt_rightOrigin newItem; move: Hlt; rewrite HF => Hlt.
+    exact: (not_ptr_lt_first Hclosed Hinv h (itemPtr newItem) Hpn Hlt). }
+  split.
+  - move=> Hoid.
+    have Hoeq : rightOrigin other = rightOrigin newItem.
+    { destruct (rightOrigin other) as [it1| |] eqn:Hoo, (rightOrigin newItem) as [it2| |] eqn:Hon;
+        rewrite /origin_id /= in Hoid;
+        try discriminate Hoid;
+        try (exfalso; (apply Honf + apply Hnnf); reflexivity);
+        try reflexivity.
+      injection Hoid as Hidd.
+      have Hit1 : ArrSet (newItem :: arr) (itemPtr it1) :=
+        push_subset arr newItem (itemPtr it1) (findPtrIdx_ArrSet arr (itemPtr it1) oRightIdx HoR).
+      have Hit2 : ArrSet (newItem :: arr) (itemPtr it2) :=
+        push_subset arr newItem (itemPtr it2) (findPtrIdx_ArrSet arr (itemPtr it2) rightIdx HfindR).
+      by rewrite (id_unique (ArrSet (newItem :: arr)) Hinv it1 it2 Hidd Hit1 Hit2). }
+    rewrite Hoeq in HoR; congruence.
+  - move=> Heq; subst oRightIdx.
+    have Hoeq : rightOrigin other = rightOrigin newItem :=
+      findPtrIdx_eq_ok_inj arr (rightOrigin other) (rightOrigin newItem) rightIdx HoR HfindR.
+    by rewrite Hoeq.
+Qed.
+
 (** CORE: the set-based scan computes the same index as the verified scanning
     scan. With the yrs-faithful break the two follow the same control flow; the
     only other would-be divergence — advancing while scanning, i.e. a scanned
