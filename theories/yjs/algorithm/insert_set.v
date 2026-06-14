@@ -371,7 +371,122 @@ Lemma setfii_loop_eq_fii_loop (arr : list (YjsItem A)) (newItem : YjsItem A)
       (in_id input) arr ibo ci destIdx
     = fii_loop count offset leftIdx rightIdx (clientId (item_id newItem)) arr scanning destIdx.
 Proof using A EqDA.
-Admitted.
+  move=> Harr Hclosed Hinv Hmax Htoitem HfindL HfindR Hl0 Hlr Hrsz.
+  have Huniq := yai_unique _ Harr.
+  have Hid : item_id newItem = in_id input.
+  { have [o [r [id [c [Hnewdef [_ [_ [Hidd _]]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+    by rewrite Hnewdef /=. }
+  induction count as [|count' IH] => offset ibo ci destIdx scanning Hcount HCouple.
+  - by [].
+  - have HC := HCouple. move: HCouple => [Hbounds [Hscaneq [Hibo [Hci Hscanpre]]]].
+    have Hcurlt : (leftIdx + Z.of_nat offset < rightIdx)%Z by lia.
+    have Hcurnn : (0 <= leftIdx + Z.of_nat offset)%Z by lia.
+    have Hilt : (Z.to_nat (leftIdx + Z.of_nat offset) < length arr)%nat by lia.
+    have [other Hother] : exists o, arr !! Z.to_nat (leftIdx + Z.of_nat offset) = Some o
+      by (apply lookup_lt_is_Some_2 in Hilt; destruct Hilt as [o Ho]; exists o).
+    have Hmem : other ∈ arr := list_elem_of_lookup_2 _ _ _ Hother.
+    have [oLeftIdx HoL] := findPtrIdx_origin_some arr other Harr Hmem.
+    have [oRightIdx HoR] := findPtrIdx_rightOrigin_some arr other Harr Hmem.
+    have Hbl := branch_left_corr arr newItem input leftIdx other oLeftIdx Harr Hclosed Hinv Htoitem HfindL Hmem HoL.
+    have Hbr := branch_right_corr arr newItem input rightIdx other oRightIdx Harr Hclosed Hinv Htoitem HfindR Hmem HoR.
+    have Hi1 : Z.of_nat (Z.to_nat (leftIdx + Z.of_nat offset) + 1) = (leftIdx + Z.of_nat offset + 1)%Z by lia.
+    have Hcount' : (leftIdx + Z.of_nat (S offset) + Z.of_nat count')%Z = rightIdx by lia.
+    have Hoth : findPtrIdx (itemPtr other) arr = Some (leftIdx + Z.of_nat offset)%Z.
+    { have := findPtrIdx_getElem arr (Z.to_nat (leftIdx + Z.of_nat offset)) other Harr Hother.
+      rewrite Z2Nat.id; [done | lia]. }
+    have Honl : origin other <> Last.
+    { move=> HL; have [h Hlt] := item_origin_lt other; move: Hlt; rewrite HL => Hlt.
+      exact: (not_last_lt_ptr Hclosed Hinv h (itemPtr other) (arrset_mem arr newItem other Hmem) Hlt). }
+    cbn [setfii_loop fii_loop].
+    rewrite /getElemExcept Hother /= HoL HoR /= Hi1 -Hid.
+    rewrite -Hid in IH.
+    destruct (decide (origin_id (origin other) = in_originId input)) as [Ho|Ho].
+    { have Heq : oLeftIdx = leftIdx := proj1 Hbl Ho.
+      destruct (decide (oLeftIdx < leftIdx)%Z) as [Hc|_]; [lia|].
+      destruct (decide (oLeftIdx = leftIdx)%Z) as [_|Hc]; [|lia].
+      destruct (decide (clientId (item_id other) < clientId (item_id newItem))%nat) as [Hcl|Hcl].
+      - exact (IH (S offset) ({[item_id other]} ∪ ibo) ∅ (leftIdx + Z.of_nat offset + 1)%Z false Hcount'
+          (Couple_advance offset ibo ci destIdx scanning arr newItem leftIdx other Hcurnn HC Hother)).
+      - destruct (decide (origin_id (rightOrigin other) = in_rightOriginId input)) as [Hro|Hro].
+        + destruct (decide (oRightIdx = rightIdx)%Z) as [_|Hc]; [reflexivity | exfalso; apply Hc; exact (proj1 Hbr Hro)].
+        + destruct (decide (oRightIdx = rightIdx)%Z) as [Hc|_]; [exfalso; apply Hro; exact (proj2 Hbr Hc)|].
+          have Harg1 : findPtrIdx (origin other) arr = Some leftIdx by rewrite HoL Heq.
+          have Horigeq : origin other = origin newItem :=
+            findPtrIdx_eq_ok_inj arr (origin other) (origin newItem) leftIdx Harg1 HfindL.
+          have Hanchor : exists dy, arr !! Z.to_nat destIdx = Some dy /\ origin dy = origin newItem.
+          { destruct scanning.
+            - exact (Hscanpre eq_refl).
+            - have Hde : destIdx = (leftIdx + Z.of_nat offset)%Z.
+              { destruct (Z.eq_dec destIdx (leftIdx + Z.of_nat offset)%Z) as [E|E]; [exact E|].
+                symmetry in Hscaneq; apply bool_decide_eq_false_1 in Hscaneq; exfalso; exact (Hscaneq E). }
+              exists other; rewrite Hde; split; [exact Hother | exact Horigeq]. }
+          exact (IH (S offset) ({[item_id other]} ∪ ibo) ({[item_id other]} ∪ ci) destIdx true Hcount'
+            (Couple_continue offset ibo ci destIdx scanning arr newItem leftIdx other Hcurnn HC Hother Hanchor)). }
+    { have Hne : oLeftIdx <> leftIdx := fun H => Ho (proj2 Hbl H).
+      destruct (decide (oLeftIdx < leftIdx)%Z) as [Hlt | Hge].
+      { destruct (origin other) as [itc| |] eqn:Hoo.
+        3:{ congruence. }
+        2:{ by []. }
+        have HoLc := HoL.
+        have [j [Hji [Hjlen Hjlk]]] := findPtrIdx_item_exists arr itc oLeftIdx HoLc.
+        cbn [origin_id].
+        destruct (decide (item_id itc ∈ {[item_id other]} ∪ ibo)) as [Hin|_]; [|by []].
+        exfalso; move: Hin; rewrite elem_of_union elem_of_singleton; move=> [Hco|Hco].
+        - have Hitc : itc = other.
+          { apply: (uniqueId_id_eq_implies_eq arr Huniq);
+              [exact (list_elem_of_lookup_2 _ _ _ Hjlk) | exact Hmem | exact Hco]. }
+          subst itc; rewrite HoLc in Hoth; injection Hoth as Hoth; lia.
+        - have Hm := proj1 (mem_window_iff arr (leftIdx + 1)%Z (leftIdx + Z.of_nat offset)%Z ibo j itc Huniq Hibo Hjlk) Hco; lia. }
+      { have Hgt : (leftIdx < oLeftIdx)%Z by lia.
+        destruct (decide (oLeftIdx = leftIdx)%Z) as [Hc|_]; [lia|].
+        destruct (origin other) as [itc| |] eqn:Hoo.
+        3:{ congruence. }
+        2:{ have Hm := HoL.
+            simpl in Hm; injection Hm as Hm; lia. }
+        have HoLc := HoL.
+        have HoL' : findPtrIdx (origin other) arr = Some oLeftIdx by rewrite Hoo.
+        have [j [Hji [Hjlen Hjlk]]] := findPtrIdx_item_exists arr itc oLeftIdx HoLc.
+        cbn [origin_id].
+        have Hoclt : (oLeftIdx < leftIdx + Z.of_nat offset)%Z.
+        { have Hlt_io : YjsLt' (itemPtr itc) (itemPtr other) by (rewrite -Hoo; exact (item_origin_lt other)).
+          exact (YjsLt'_findPtrIdx_lt arr (itemPtr itc) (itemPtr other) oLeftIdx (leftIdx + Z.of_nat offset)%Z Harr (list_elem_of_lookup_2 _ _ _ Hjlk) Hmem Hlt_io HoLc Hoth). }
+        have Hcolibo : item_id itc ∈ ({[item_id other]} ∪ ibo).
+        { rewrite elem_of_union; right.
+          apply (proj2 (mem_window_iff arr (leftIdx + 1)%Z (leftIdx + Z.of_nat offset)%Z ibo j itc Huniq Hibo Hjlk)); lia. }
+        destruct (decide (item_id itc ∈ {[item_id other]} ∪ ibo)) as [_|Hn]; [|exfalso; exact (Hn Hcolibo)].
+        destruct scanning.
+        - have Hdltc : (destIdx < leftIdx + Z.of_nat offset)%Z.
+          { symmetry in Hscaneq; apply bool_decide_eq_true_1 in Hscaneq; lia. }
+          have [dy [Hdy Hdyo]] := Hscanpre eq_refl.
+          have Hdest_le : (destIdx <= oLeftIdx)%Z.
+          { have Hdlt : YjsLt' (itemPtr dy) (itemPtr other).
+            { apply (ss_lookup_lt arr (Z.to_nat destIdx) (Z.to_nat (leftIdx + Z.of_nat offset)) dy other (yai_sorted _ Harr) Hdy Hother); lia. }
+            case: (no_cross_origin Hclosed Hinv dy other (arrset_mem arr newItem dy (list_elem_of_lookup_2 _ _ _ Hdy)) (arrset_mem arr newItem other Hmem) Hdlt) => [Hle | Hle].
+            - exfalso. have Hdyfind : findPtrIdx (origin dy) arr = Some leftIdx by rewrite Hdyo.
+              have := YjsLeq'_findPtrIdx_leq arr (origin other) (origin dy) oLeftIdx leftIdx Harr (findPtrIdx_ArrSet arr (origin other) oLeftIdx HoL') (findPtrIdx_ArrSet arr (origin dy) leftIdx Hdyfind) Hle HoL' Hdyfind; lia.
+            - have Hdyf : findPtrIdx (itemPtr dy) arr = Some destIdx.
+              { have := findPtrIdx_getElem arr (Z.to_nat destIdx) dy Harr Hdy. rewrite Z2Nat.id; [done | lia]. }
+              exact (YjsLeq'_findPtrIdx_leq arr (itemPtr dy) (origin other) destIdx oLeftIdx Harr (list_elem_of_lookup_2 _ _ _ Hdy) (findPtrIdx_ArrSet arr (origin other) oLeftIdx HoL') Hle Hdyf HoL'). }
+          have Hcolci : item_id itc ∈ ({[item_id other]} ∪ ci).
+          { rewrite elem_of_union; right.
+            apply (proj2 (mem_window_iff arr destIdx (leftIdx + Z.of_nat offset)%Z ci j itc Huniq Hci Hjlk)); lia. }
+          destruct (decide (item_id itc ∉ {[item_id other]} ∪ ci)) as [Hn|_]; [exfalso; exact (Hn Hcolci)|].
+          exact (IH (S offset) ({[item_id other]} ∪ ibo) ({[item_id other]} ∪ ci) destIdx true Hcount'
+            (Couple_continue offset ibo ci destIdx true arr newItem leftIdx other Hcurnn HC Hother (Hscanpre eq_refl))).
+        - have Hde : destIdx = (leftIdx + Z.of_nat offset)%Z.
+          { destruct (Z.eq_dec destIdx (leftIdx + Z.of_nat offset)%Z) as [E|E]; [exact E|].
+            symmetry in Hscaneq; apply bool_decide_eq_false_1 in Hscaneq; exfalso; exact (Hscaneq E). }
+          have Hcolnotci : item_id itc ∉ ({[item_id other]} ∪ ci).
+          { rewrite elem_of_union elem_of_singleton; move=> [Hco|Hco].
+            - have Hitc : itc = other.
+              { apply: (uniqueId_id_eq_implies_eq arr Huniq);
+                  [exact (list_elem_of_lookup_2 _ _ _ Hjlk) | exact Hmem | exact Hco]. }
+              subst itc; rewrite HoLc in Hoth; injection Hoth as Hoth; lia.
+            - have Hm := proj1 (mem_window_iff arr destIdx (leftIdx + Z.of_nat offset)%Z ci j itc Huniq Hci Hjlk) Hco; lia. }
+          destruct (decide (item_id itc ∉ {[item_id other]} ∪ ci)) as [_|Hn]; [|exfalso; exact (Hn Hcolnotci)].
+          exact (IH (S offset) ({[item_id other]} ∪ ibo) ∅ (leftIdx + Z.of_nat offset + 1)%Z false Hcount'
+            (Couple_advance offset ibo ci destIdx false arr newItem leftIdx other Hcurnn HC Hother)). } }
+Qed.
 
 (** The two index-finders agree: the initial state satisfies [Couple]. *)
 Lemma setfindIntegratedIndex_eq (arr : list (YjsItem A)) (newItem : YjsItem A)
