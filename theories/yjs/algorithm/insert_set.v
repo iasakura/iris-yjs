@@ -227,6 +227,32 @@ Proof using A EqDA.
     by rewrite Hoeq.
 Qed.
 
+(** Membership in a window-id-set is equivalent to the index lying in the
+    window: the bridge from the set loop's [col ∈ ibo'] / [col ∉ ci'] tests to
+    [fii_loop]'s index comparisons. *)
+Lemma mem_window_iff (arr : list (YjsItem A)) (lo hi : Z) (S : gset YjsId)
+    (k0 : nat) (it0 : YjsItem A) :
+  uniqueId arr ->
+  (forall idz, idz ∈ S <-> exists k y, (lo <= Z.of_nat k)%Z /\ (Z.of_nat k < hi)%Z /\
+     arr !! k = Some y /\ item_id y = idz) ->
+  arr !! k0 = Some it0 ->
+  (item_id it0 ∈ S <-> (lo <= Z.of_nat k0)%Z /\ (Z.of_nat k0 < hi)%Z).
+Proof using A EqDA.
+  move=> Huniq HS Hk0.
+  rewrite HS; split.
+  - move=> [k [y [Hlo [Hhi [Hky Hidy]]]]].
+    have Hmy : y ∈ arr := list_elem_of_lookup_2 _ _ _ Hky.
+    have Hm0 : it0 ∈ arr := list_elem_of_lookup_2 _ _ _ Hk0.
+    have Hyit0 : y = it0 by apply: (uniqueId_id_eq_implies_eq arr Huniq); eauto.
+    subst y.
+    have Hkk : k = k0.
+    { destruct (Nat.lt_trichotomy k k0) as [Hlt|[Heq|Hgt]]; [|exact Heq|].
+      - exfalso; apply (ss_lookup_lt arr k k0 it0 it0 Huniq Hky Hk0 Hlt); reflexivity.
+      - exfalso; apply (ss_lookup_lt arr k0 k it0 it0 Huniq Hk0 Hky Hgt); reflexivity. }
+    by subst k.
+  - move=> [Hlo Hhi]; exists k0, it0; done.
+Qed.
+
 (** CORE: the set-based scan computes the same index as the verified scanning
     scan. With the yrs-faithful break the two follow the same control flow; the
     only other would-be divergence — advancing while scanning, i.e. a scanned
