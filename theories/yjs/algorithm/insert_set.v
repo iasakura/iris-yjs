@@ -56,12 +56,17 @@ Fixpoint setfii_loop (count offset : nat) (leftIdx rightIdx : Z)
     else
       match origin_id (origin other) with
       | Some col =>
-        if decide (col ∈ ibo' /\ col ∉ ci') then
-          setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
-            ibo' ∅ (Z.of_nat (i + 1))
+        if decide (col ∈ ibo') then
+          (* conflict's left origin was already scanned (case 2) *)
+          if decide (col ∉ ci') then
+            setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
+              ibo' ∅ (Z.of_nat (i + 1))
+          else
+            setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
+              ibo' ci' destIdx
         else
-          setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
-            ibo' ci' destIdx
+          (* left origin is before this run: origins would cross, stop (yrs) *)
+          Some destIdx
       | None => Some destIdx
       end
   end.
@@ -129,9 +134,13 @@ Qed.
     exactly like the scanning loop ([fii_loop_spec]).
 
     [TODO] the loop-invariant induction (the [ibo]/[ci] <-> index coupling).
-    Reuses the order-theoretic break/advance lemmas from insert_loop.v
-    ([break1_newItem_lt], [break2_newItem_lt], [other_lt_newItem],
-    [same_origin_bigger_id], [exit_C2], [loopInv_YjsLt']). *)
+    With the yrs-faithful break (stop when a scanned item's left origin lies
+    before this run), [setfii_loop] follows the same control flow as the
+    scanning [fii_loop]: its only would-be divergence (advancing while scanning,
+    [oLeftIdx ∈ (leftIdx, destIdx)]) is ruled out by no-cross-origin, because the
+    scanning anchor [arr[destIdx]] has origin [= origin newItem] at [leftIdx], so
+    such an edge would cross. Reuses [break1_newItem_lt], [break2_newItem_lt],
+    [other_lt_newItem], [same_origin_bigger_id], [exit_C2], [loopInv_YjsLt']. *)
 Lemma setfindIntegratedIndex_spec (arr : list (YjsItem A)) (newItem : YjsItem A)
     (input : IntegrateInput (A := A)) (leftIdx rightIdx : Z) (d : nat) :
   YjsArrInvariant arr ->
