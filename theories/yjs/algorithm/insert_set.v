@@ -106,7 +106,7 @@ Definition Couple (arr : list (YjsItem A)) (newItem : YjsItem A) (leftIdx : Z)
     (offset : nat) (ibo ci : gset YjsId) (destIdx : Z) (scanning : bool) : Prop :=
   (leftIdx + 1 <= destIdx <= leftIdx + Z.of_nat offset)%Z /\
   scanning = bool_decide (destIdx <> leftIdx + Z.of_nat offset)%Z /\
-  (forall idz, idz ∈ ibo <-> exists k y, (leftIdx < Z.of_nat k)%Z /\
+  (forall idz, idz ∈ ibo <-> exists k y, (leftIdx + 1 <= Z.of_nat k)%Z /\
      (Z.of_nat k < leftIdx + Z.of_nat offset)%Z /\ arr !! k = Some y /\ item_id y = idz) /\
   (forall idz, idz ∈ ci <-> exists k y, (destIdx <= Z.of_nat k)%Z /\
      (Z.of_nat k < leftIdx + Z.of_nat offset)%Z /\ arr !! k = Some y /\ item_id y = idz) /\
@@ -251,6 +251,73 @@ Proof using A EqDA.
       - exfalso; apply (ss_lookup_lt arr k0 k it0 it0 Huniq Hk0 Hky Hgt); reflexivity. }
     by subst k.
   - move=> [Hlo Hhi]; exists k0, it0; done.
+Qed.
+
+(** Extending a window id-set by the element at its (exclusive) upper bound. *)
+Lemma window_extend (arr : list (YjsItem A)) (lo hi : Z) (St : gset YjsId) (other : YjsItem A) :
+  (0 <= hi)%Z -> (lo <= hi)%Z ->
+  arr !! Z.to_nat hi = Some other ->
+  (forall idz, idz ∈ St <-> exists k y, (lo <= Z.of_nat k)%Z /\ (Z.of_nat k < hi)%Z /\
+     arr !! k = Some y /\ item_id y = idz) ->
+  (forall idz, idz ∈ ({[item_id other]} ∪ St) <-> exists k y, (lo <= Z.of_nat k)%Z /\
+     (Z.of_nat k < hi + 1)%Z /\ arr !! k = Some y /\ item_id y = idz).
+Proof using A EqDA.
+  move=> Hhi0 Hlohi Hother HSt idz.
+  rewrite elem_of_union elem_of_singleton HSt; split.
+  - move=> [-> | [k [y [Hlo [Hlt [Hky Hidy]]]]]].
+    + exists (Z.to_nat hi), other; rewrite Z2Nat.id //; split_and!; [lia|lia|exact Hother|done].
+    + exists k, y; split_and!; [lia|lia|done|done].
+  - move=> [k [y [Hlo [Hlt [Hky Hidy]]]]].
+    destruct (decide (Z.of_nat k = hi)) as [Heq|Hne].
+    + left; have Hkeq : k = Z.to_nat hi by lia.
+      rewrite Hkeq Hother in Hky; by injection Hky as <-.
+    + right; exists k, y; split_and!; [done|lia|done|done].
+Qed.
+
+(** [Couple] is preserved by an advance step (destIdx jumps to the frontier). *)
+Lemma Couple_advance (offset : nat) (ibo ci : gset YjsId) (destIdx : Z) (scanning : bool)
+    (arr : list (YjsItem A)) (newItem : YjsItem A) (leftIdx : Z) (other : YjsItem A) :
+  (0 <= leftIdx + Z.of_nat offset)%Z ->
+  Couple arr newItem leftIdx offset ibo ci destIdx scanning ->
+  arr !! Z.to_nat (leftIdx + Z.of_nat offset) = Some other ->
+  Couple arr newItem leftIdx (S offset) ({[item_id other]} ∪ ibo) ∅
+    (leftIdx + Z.of_nat offset + 1)%Z false.
+Proof using A EqDA.
+  move=> Hge0 [Hb [Hsc [Hibo [Hci Hsp]]]] Hother.
+  rewrite /Couple; split_and!.
+  - lia.
+  - lia.
+  - symmetry; apply bool_decide_eq_false_2; move=> Hne; lia.
+  - have H := window_extend arr (leftIdx + 1) (leftIdx + Z.of_nat offset) ibo other
+      ltac:(lia) ltac:(lia) Hother Hibo.
+    move=> idz; rewrite H; split; move=> [k [y Hk]]; exists k, y; (split_and!; [lia|lia| tauto | tauto]).
+  - move=> idz; split; [set_solver | move=> [k [y [Hlo [Hlt _]]]]; exfalso; lia].
+  - done.
+Qed.
+
+(** [Couple] is preserved by a continue step (destIdx unchanged), given the
+    anchor's origin matches (so the derived scanning bit stays consistent). *)
+Lemma Couple_continue (offset : nat) (ibo ci : gset YjsId) (destIdx : Z) (scanning : bool)
+    (arr : list (YjsItem A)) (newItem : YjsItem A) (leftIdx : Z) (other : YjsItem A) :
+  (0 <= leftIdx + Z.of_nat offset)%Z ->
+  Couple arr newItem leftIdx offset ibo ci destIdx scanning ->
+  arr !! Z.to_nat (leftIdx + Z.of_nat offset) = Some other ->
+  (exists dy, arr !! Z.to_nat destIdx = Some dy /\ origin dy = origin newItem) ->
+  Couple arr newItem leftIdx (S offset) ({[item_id other]} ∪ ibo) ({[item_id other]} ∪ ci)
+    destIdx true.
+Proof using A EqDA.
+  move=> Hge0 [Hb [Hsc [Hibo [Hci Hsp]]]] Hother Hanchor.
+  rewrite /Couple; split_and!.
+  - lia.
+  - lia.
+  - symmetry; apply bool_decide_eq_true_2; move=> Heq; lia.
+  - have H := window_extend arr (leftIdx + 1) (leftIdx + Z.of_nat offset) ibo other
+      ltac:(lia) ltac:(lia) Hother Hibo.
+    move=> idz; rewrite H; split; move=> [k [y Hk]]; exists k, y; (split_and!; [lia|lia|tauto|tauto]).
+  - have H := window_extend arr destIdx (leftIdx + Z.of_nat offset) ci other
+      ltac:(lia) ltac:(lia) Hother Hci.
+    move=> idz; rewrite H; split; move=> [k [y Hk]]; exists k, y; (split_and!; [lia|lia|tauto|tauto]).
+  - move=> _; exact Hanchor.
 Qed.
 
 (** CORE: the set-based scan computes the same index as the verified scanning
