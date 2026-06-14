@@ -320,6 +320,30 @@ Proof using A EqDA.
   - move=> _; exact Hanchor.
 Qed.
 
+(** [findPtrIdx] of an item's origin / right-origin always succeeds (the origin
+    is in the closed set). *)
+Lemma findPtrIdx_origin_some (arr : list (YjsItem A)) (x : YjsItem A) :
+  YjsArrInvariant arr -> x ∈ arr -> exists z, findPtrIdx (origin x) arr = Some z.
+Proof using A EqDA.
+  move=> Harr Hx.
+  case: (arr_set_closed_exists_index_for_origin arr x (yai_closed _ Harr) Hx)
+    => [Hf|[Hl|[i [it [Hi Heq]]]]].
+  - rewrite Hf; by exists (-1)%Z.
+  - rewrite Hl; by exists (Z.of_nat (length arr)).
+  - rewrite Heq; exists (Z.of_nat i); exact: (findPtrIdx_getElem arr i it Harr Hi).
+Qed.
+
+Lemma findPtrIdx_rightOrigin_some (arr : list (YjsItem A)) (x : YjsItem A) :
+  YjsArrInvariant arr -> x ∈ arr -> exists z, findPtrIdx (rightOrigin x) arr = Some z.
+Proof using A EqDA.
+  move=> Harr Hx.
+  case: (arr_set_closed_exists_index_for_right_origin arr x (yai_closed _ Harr) Hx)
+    => [Hf|[Hl|[i [it [Hi Heq]]]]].
+  - rewrite Hf; by exists (-1)%Z.
+  - rewrite Hl; by exists (Z.of_nat (length arr)).
+  - rewrite Heq; exists (Z.of_nat i); exact: (findPtrIdx_getElem arr i it Harr Hi).
+Qed.
+
 (** CORE: the set-based scan computes the same index as the verified scanning
     scan. With the yrs-faithful break the two follow the same control flow; the
     only other would-be divergence — advancing while scanning, i.e. a scanned
