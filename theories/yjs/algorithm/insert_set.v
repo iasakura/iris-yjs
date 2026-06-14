@@ -95,54 +95,35 @@ End set_loop.
 Section set_spec.
 Context {A : Type} `{EqDA : EqDecision A}.
 
-(** The sorted-position characterization determines the insertion index
-    uniquely: in a valid array, at most one index has everything before it
-    [< newItem] and the item at it [> newItem]. *)
-Lemma insert_index_unique (arr : list (YjsItem A)) (newItem : YjsItem A) (d1 d2 : nat) :
-  IsClosedItemSet (ArrSet (newItem :: arr)) ->
-  ItemSetInvariant (ArrSet (newItem :: arr)) ->
-  (forall k y, (k < d1)%nat -> arr !! k = Some y -> YjsLt' (itemPtr y) (itemPtr newItem)) ->
-  (forall y, arr !! d1 = Some y -> YjsLt' (itemPtr newItem) (itemPtr y)) ->
-  (forall k y, (k < d2)%nat -> arr !! k = Some y -> YjsLt' (itemPtr y) (itemPtr newItem)) ->
-  (forall y, arr !! d2 = Some y -> YjsLt' (itemPtr newItem) (itemPtr y)) ->
-  (d1 <= length arr)%nat -> (d2 <= length arr)%nat ->
-  d1 = d2.
-Proof using A EqDA.
-  move=> Hclosed Hinv HA1 HA2 HB1 HB2 Hd1 Hd2.
-  (* If d1 <> d2, the smaller index's item is both < and > newItem. *)
-  enough (Hnlt : forall e1 e2,
-    (forall k y, (k < e1)%nat -> arr !! k = Some y -> YjsLt' (itemPtr y) (itemPtr newItem)) ->
-    (forall y, arr !! e2 = Some y -> YjsLt' (itemPtr newItem) (itemPtr y)) ->
-    (e1 <= length arr)%nat -> ~ (e2 < e1)%nat).
-  { destruct (Nat.lt_trichotomy d1 d2) as [Hlt | [Heq | Hgt]]; [|exact Heq|].
-    - exfalso; exact: (Hnlt d2 d1 HB1 HA2 Hd2 Hlt).
-    - exfalso; exact: (Hnlt d1 d2 HA1 HB2 Hd1 Hgt). }
-  move=> e1 e2 He1 He2 He1len Hlt.
-  have [y Hy] : exists y, arr !! e2 = Some y.
-  { apply lookup_lt_is_Some_2; lia. }
-  have Hgt := He2 y Hy.
-  have Hlt' := He1 e2 y Hlt Hy.
-  exact: (yjs_lt_asymm Hclosed Hinv (itemPtr y) (itemPtr newItem)
-            (arrset_mem arr newItem y (list_elem_of_lookup_2 _ _ _ Hy))
-            (arrset_new arr newItem) Hlt' Hgt).
-Qed.
+(** Coupling between the set-based accumulators and the scanning state at a loop
+    step ([cur = leftIdx + offset] is the next index to scan):
+    - [scanning] is on exactly when [destIdx] has fallen behind the frontier;
+    - [ibo] is the id set of the scanned window [(leftIdx, cur)];
+    - [ci] is the id set of [[destIdx, cur)] (ids since the last advance);
+    - when scanning, the anchor [arr[destIdx]] has [origin = origin newItem]
+      (used to rule out advancing-while-scanning via no-cross-origin). *)
+Definition Couple (arr : list (YjsItem A)) (newItem : YjsItem A) (leftIdx : Z)
+    (offset : nat) (ibo ci : gset YjsId) (destIdx : Z) (scanning : bool) : Prop :=
+  (leftIdx + 1 <= destIdx <= leftIdx + Z.of_nat offset)%Z /\
+  scanning = bool_decide (destIdx <> leftIdx + Z.of_nat offset)%Z /\
+  (forall idz, idz ∈ ibo <-> exists k y, (leftIdx < Z.of_nat k)%Z /\
+     (Z.of_nat k < leftIdx + Z.of_nat offset)%Z /\ arr !! k = Some y /\ item_id y = idz) /\
+  (forall idz, idz ∈ ci <-> exists k y, (destIdx <= Z.of_nat k)%Z /\
+     (Z.of_nat k < leftIdx + Z.of_nat offset)%Z /\ arr !! k = Some y /\ item_id y = idz) /\
+  (scanning = true -> exists dy, arr !! Z.to_nat destIdx = Some dy /\ origin dy = origin newItem).
 
-(** The set-based loop's output satisfies the sorted-position characterization:
-    everything before it is [< newItem], the item at it is [> newItem], and it is
-    in bounds. This is the core correctness of the set-based algorithm — the
-    [ibo]/[ci] bookkeeping lands the new item at the [YjsLt']-sorted position,
-    exactly like the scanning loop ([fii_loop_spec]).
+(** CORE: the set-based scan computes the same index as the verified scanning
+    scan. With the yrs-faithful break the two follow the same control flow; the
+    only other would-be divergence — advancing while scanning, i.e. a scanned
+    item whose left origin sits in [(leftIdx, destIdx)] — is impossible by
+    no-cross-origin (the scanning anchor [arr[destIdx]] has origin [origin
+    newItem] at [leftIdx], so such an edge would cross). Proved by induction on
+    the fuel, maintaining [Couple].
 
-    [TODO] the loop-invariant induction (the [ibo]/[ci] <-> index coupling).
-    With the yrs-faithful break (stop when a scanned item's left origin lies
-    before this run), [setfii_loop] follows the same control flow as the
-    scanning [fii_loop]: its only would-be divergence (advancing while scanning,
-    [oLeftIdx ∈ (leftIdx, destIdx)]) is ruled out by no-cross-origin, because the
-    scanning anchor [arr[destIdx]] has origin [= origin newItem] at [leftIdx], so
-    such an edge would cross. Reuses [break1_newItem_lt], [break2_newItem_lt],
-    [other_lt_newItem], [same_origin_bigger_id], [exit_C2], [loopInv_YjsLt']. *)
-Lemma setfindIntegratedIndex_spec (arr : list (YjsItem A)) (newItem : YjsItem A)
-    (input : IntegrateInput (A := A)) (leftIdx rightIdx : Z) (d : nat) :
+    [TODO] the coupling induction. Reuses [no_cross_origin] and the same-origin /
+    break facts from insert_loop.v. *)
+Lemma setfii_loop_eq_fii_loop (arr : list (YjsItem A)) (newItem : YjsItem A)
+    (input : IntegrateInput (A := A)) (leftIdx rightIdx : Z) :
   YjsArrInvariant arr ->
   IsClosedItemSet (ArrSet (newItem :: arr)) ->
   ItemSetInvariant (ArrSet (newItem :: arr)) ->
@@ -151,32 +132,63 @@ Lemma setfindIntegratedIndex_spec (arr : list (YjsItem A)) (newItem : YjsItem A)
   findPtrIdx (origin newItem) arr = Some leftIdx ->
   findPtrIdx (rightOrigin newItem) arr = Some rightIdx ->
   (-1 <= leftIdx)%Z -> (leftIdx < rightIdx)%Z -> (rightIdx <= Z.of_nat (length arr))%Z ->
-  setfindIntegratedIndex leftIdx rightIdx input arr = Some d ->
-  (forall k y, (k < d)%nat -> arr !! k = Some y -> YjsLt' (itemPtr y) (itemPtr newItem)) /\
-  (forall y, arr !! d = Some y -> YjsLt' (itemPtr newItem) (itemPtr y)) /\
-  (d <= length arr)%nat.
+  forall (count offset : nat) (ibo ci : gset YjsId) (destIdx : Z) (scanning : bool),
+    (leftIdx + Z.of_nat offset + Z.of_nat count = rightIdx)%Z ->
+    Couple arr newItem leftIdx offset ibo ci destIdx scanning ->
+    setfii_loop count offset leftIdx rightIdx (in_originId input) (in_rightOriginId input)
+      (in_id input) arr ibo ci destIdx
+    = fii_loop count offset leftIdx rightIdx (clientId (item_id newItem)) arr scanning destIdx.
 Proof using A EqDA.
 Admitted.
 
-(** The set-based integrate preserves the document invariant. The set loop lands
-    at the sorted position, so [YjsArrInvariant_insertIdxIfInBounds] applies —
-    mirrors [YjsArrInvariant_integrate]. *)
-Theorem YjsArrInvariant_setintegrate (input : IntegrateInput (A := A))
-    (arr newArr : list (YjsItem A)) (newItem : YjsItem A) :
+(** The two index-finders agree: the initial state satisfies [Couple]. *)
+Lemma setfindIntegratedIndex_eq (arr : list (YjsItem A)) (newItem : YjsItem A)
+    (input : IntegrateInput (A := A)) (leftIdx rightIdx : Z) :
+  YjsArrInvariant arr ->
+  IsClosedItemSet (ArrSet (newItem :: arr)) ->
+  ItemSetInvariant (ArrSet (newItem :: arr)) ->
+  maximalId newItem arr ->
+  toItem input arr = Some newItem ->
+  findPtrIdx (origin newItem) arr = Some leftIdx ->
+  findPtrIdx (rightOrigin newItem) arr = Some rightIdx ->
+  (-1 <= leftIdx)%Z -> (leftIdx < rightIdx)%Z -> (rightIdx <= Z.of_nat (length arr))%Z ->
+  setfindIntegratedIndex leftIdx rightIdx input arr = findIntegratedIndex leftIdx rightIdx input arr.
+Proof using A EqDA.
+  move=> Harr Hclosed Hinv Hmax Htoitem HfindL HfindR Hl0 Hlr Hrsz.
+  have Hid : item_id newItem = in_id input.
+  { have [o [r [id [c [Hnewdef [_ [_ [Hidd _]]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+    by rewrite Hnewdef /=. }
+  have Hcount : (leftIdx + Z.of_nat 1 + Z.of_nat (Z.to_nat (rightIdx - leftIdx) - 1) = rightIdx)%Z by lia.
+  have HCouple : Couple arr newItem leftIdx 1 ∅ ∅ (leftIdx + 1)%Z false.
+  { rewrite /Couple; split_and!.
+    - lia.
+    - lia.
+    - case_bool_decide as Hc; [exfalso; lia | done].
+    - move=> idz; split; [set_solver | move=> [k [y [Hk1 [Hk2 _]]]]; exfalso; lia].
+    - move=> idz; split; [set_solver | move=> [k [y [Hk1 [Hk2 _]]]]; exfalso; lia].
+    - done. }
+  have Heq := setfii_loop_eq_fii_loop arr newItem input leftIdx rightIdx
+    Harr Hclosed Hinv Hmax Htoitem HfindL HfindR Hl0 Hlr Hrsz
+    (Z.to_nat (rightIdx - leftIdx) - 1) 1 ∅ ∅ (leftIdx + 1)%Z false Hcount HCouple.
+  rewrite /setfindIntegratedIndex /findIntegratedIndex Heq Hid //.
+Qed.
+
+(** Convergence transfer: the set-based integrate equals the verified one, so it
+    inherits all of [integrate]'s results (invariant, commutativity, ...). *)
+Theorem setintegrate_eq_integrate (input : IntegrateInput (A := A)) (arr : list (YjsItem A))
+    (newItem : YjsItem A) :
   YjsArrInvariant arr ->
   toItem input arr = Some newItem ->
   IsItemValid newItem ->
   maximalId newItem arr ->
-  setintegrate input arr = Some newArr ->
-  YjsArrInvariant newArr.
+  setintegrate input arr = integrate input arr.
 Proof using A EqDA.
   move=> Harr Htoitem Hvalid Hmax.
-  rewrite /setintegrate.
-  move=> /bind_Some [leftIdx [HfindLeft Hr1]].
-  move: Hr1 => /bind_Some [rightIdx [HfindRight Hr2]].
-  move: Hr2 => /bind_Some [destIdx [HfindIdx Hr3]].
-  move: Hr3 => /bind_Some [item [Hmk [= <-]]].
   have Huniq := yai_unique _ Harr.
+  rewrite /setintegrate /integrate.
+  destruct (findLeftIdx (in_originId input) arr) as [leftIdx|] eqn:HfindLeft; last done.
+  destruct (findRightIdx (in_rightOriginId input) arr) as [rightIdx|] eqn:HfindRight; last done.
+  simpl.
   have HfindL : findPtrIdx (origin newItem) arr = Some leftIdx.
   { rewrite -(findLeftIdx_findPtrIdx_eq input newItem arr Huniq Htoitem); exact HfindLeft. }
   have HfindR : findPtrIdx (rightOrigin newItem) arr = Some rightIdx.
@@ -197,24 +209,24 @@ Proof using A EqDA.
   have HleftR : (leftIdx < rightIdx)%Z :=
     @YjsLt'_findPtrIdx_lt _ EqDA arr (origin newItem) (rightOrigin newItem) leftIdx rightIdx
       Harr Horig_set Hror_set (iiv_origin_lt _ Hvalid) HfindL HfindR.
-  have [o [r [id [c [Hnewdef [HoLp [HoRp [Hid Hc]]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
-  have Hitem : item = newItem.
-  { move: Hmk; rewrite /mkItemByIndex.
-    have [lptr [Hgl HLl]] := findLeftIdx_getElemExcept arr input leftIdx HfindLeft.
-    have [rptr [Hgr HRr]] := findRightIdx_getElemExcept arr input rightIdx HfindRight.
-    rewrite Hgl Hgr /=.
-    have Hlo : lptr = o := isLeftIdPtr_unique arr (in_originId input) lptr o HLl HoLp.
-    have Hro : rptr = r := isRightIdPtr_unique arr (in_rightOriginId input) rptr r HRr HoRp.
-    move=> [= <-]; by rewrite Hlo Hro Hnewdef Hid Hc. }
-  have [HC1 [HC2 Hdlen]] := setfindIntegratedIndex_spec arr newItem input leftIdx rightIdx destIdx
-    Harr Hclosed Hinv Hmax Htoitem HfindL HfindR HleftIdx HleftR HRsize HfindIdx.
-  rewrite Hitem.
-  apply: (YjsArrInvariant_insertIdxIfInBounds arr newItem destIdx Hclosed Hinv Harr Hdlen).
-  - move=> y Hipos Hy; apply: (HC1 (destIdx - 1) y _ Hy); lia.
-  - move=> y Hy; exact: (HC2 y Hy).
-  - move=> a Ha Haid.
-    have Hcc : clientId (item_id a) = clientId (item_id newItem) by rewrite Haid.
-    have := Hmax a Ha Hcc; rewrite Haid; lia.
+  by rewrite (setfindIntegratedIndex_eq arr newItem input leftIdx rightIdx
+       Harr Hclosed Hinv Hmax Htoitem HfindL HfindR HleftIdx HleftR HRsize).
+Qed.
+
+(** Invariant preservation, inherited from [integrate]. *)
+Theorem YjsArrInvariant_setintegrate (input : IntegrateInput (A := A))
+    (arr newArr : list (YjsItem A)) (newItem : YjsItem A) :
+  YjsArrInvariant arr ->
+  toItem input arr = Some newItem ->
+  IsItemValid newItem ->
+  maximalId newItem arr ->
+  setintegrate input arr = Some newArr ->
+  YjsArrInvariant newArr.
+Proof using A EqDA.
+  move=> Harr Htoitem Hvalid Hmax.
+  rewrite (setintegrate_eq_integrate input arr newItem Harr Htoitem Hvalid Hmax) => Hint.
+  have [i [_ [_ Hres]]] := YjsArrInvariant_integrate input arr newArr newItem Harr Htoitem Hvalid Hmax Hint.
+  exact Hres.
 Qed.
 
 Theorem YjsArrInvariant_setintegrateSafe (input : IntegrateInput (A := A))
