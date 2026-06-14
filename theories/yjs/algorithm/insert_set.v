@@ -112,6 +112,34 @@ Definition Couple (arr : list (YjsItem A)) (newItem : YjsItem A) (leftIdx : Z)
      (Z.of_nat k < leftIdx + Z.of_nat offset)%Z /\ arr !! k = Some y /\ item_id y = idz) /\
   (scanning = true -> exists dy, arr !! Z.to_nat destIdx = Some dy /\ origin dy = origin newItem).
 
+(** The new item's resolved origins carry exactly the input's origin ids, so the
+    set loop's id-equality tests match the index tests of [fii_loop]. *)
+Lemma in_originId_origin_id (arr : list (YjsItem A)) (newItem : YjsItem A)
+    (input : IntegrateInput (A := A)) :
+  toItem input arr = Some newItem ->
+  origin_id (origin newItem) = in_originId input.
+Proof using A EqDA.
+  move=> Htoitem.
+  have [o [r [id [c [Hnewdef [HoLp [_ _]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+  subst newItem; rewrite /origin.
+  move: HoLp; rewrite /isLeftIdPtr; destruct (in_originId input) as [pid|].
+  - move=> [item [-> Hfind]]; rewrite /origin_id /=; by rewrite (find_by_id_id pid arr item Hfind).
+  - by move=> ->.
+Qed.
+
+Lemma in_rightOriginId_rightOrigin_id (arr : list (YjsItem A)) (newItem : YjsItem A)
+    (input : IntegrateInput (A := A)) :
+  toItem input arr = Some newItem ->
+  origin_id (rightOrigin newItem) = in_rightOriginId input.
+Proof using A EqDA.
+  move=> Htoitem.
+  have [o [r [id [c [Hnewdef [_ [HoRp _]]]]]]] := proj1 (toItem_ok_iff input arr newItem) Htoitem.
+  subst newItem; rewrite /rightOrigin.
+  move: HoRp; rewrite /isRightIdPtr; destruct (in_rightOriginId input) as [pid|].
+  - move=> [item [-> Hfind]]; rewrite /origin_id /=; by rewrite (find_by_id_id pid arr item Hfind).
+  - by move=> ->.
+Qed.
+
 (** CORE: the set-based scan computes the same index as the verified scanning
     scan. With the yrs-faithful break the two follow the same control flow; the
     only other would-be divergence — advancing while scanning, i.e. a scanned
