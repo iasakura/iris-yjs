@@ -63,8 +63,14 @@ Record NetworkBase := {
   nb_nodes :> NodeHistories;
   deliver_has_a_cause : forall i e,
     EvDeliver e ∈ histories nb_nodes i -> exists j, EvBroadcast e ∈ histories nb_nodes j;
+  (* A node that broadcasts a message must later deliver it locally (Gomes et
+     al., OOPSLA 2017). Deliberately NOT the converse ([EvDeliver e ∈ …] as the
+     hypothesis): that would force every delivered message to have a *local*
+     broadcast, which together with per-client broadcast ownership
+     ([histories_client_id] / [msg_id_unique]) would rule out delivering any
+     remote message at all. *)
   deliver_locally : forall i e,
-    EvDeliver e ∈ histories nb_nodes i ->
+    EvBroadcast e ∈ histories nb_nodes i ->
     locallyOrdered nb_nodes i (EvBroadcast e) (EvDeliver e);
   msg_id_unique : forall mi mj i j,
     EvBroadcast mi ∈ histories nb_nodes i -> EvBroadcast mj ∈ histories nb_nodes j ->
@@ -196,10 +202,10 @@ Proof.
       right; exact: (HappensBefore_trans2 Hba Ha). }
     have Hlo_db_da : locallyOrdered cn i (EvDeliver b') (EvDeliver a')
       := causal_delivery cn i b' a' Hmem_da' Hba'.
-    have Hmem_db' : EvDeliver b' ∈ histories cn i
-      by case: Hlo_db_da => l1 [l2 [l3 ->]]; set_solver.
+    have Hmem_bb' : EvBroadcast b' ∈ histories cn i
+      by case: Hlo => l1 [l2 [l3 ->]]; set_solver.
     have Hlo_bb'_db' : locallyOrdered cn i (EvBroadcast b') (EvDeliver b')
-      := deliver_locally cn i b' Hmem_db'.
+      := deliver_locally cn i b' Hmem_bb'.
     have Hlo_bb'_da' : locallyOrdered cn i (EvBroadcast b') (EvDeliver a')
       := locallyOrdered_trans Hlo_bb'_db' Hlo_db_da.
     exact: (locallyOrdered_asymm Hlo_bb'_da' Hlo).
