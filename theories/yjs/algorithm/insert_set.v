@@ -5,7 +5,7 @@
     and advances the destination when a scanned item's origin lies before the
     current destination ([col ∈ ibo ∧ col ∉ ci]).
 
-    We prove [setfii_loop]'s output satisfies the same sorted-position
+    We prove [set_find_integration_loop]'s output satisfies the same sorted-position
     characterization as [fii_loop] (everything before it is [< newItem], the
     item at it is [> newItem]); from there [setintegrate] preserves
     [YjsArrInvariant], and [setintegrate = integrate] follows because two valid
@@ -33,7 +33,7 @@ Definition origin_id (p : YjsPtr A) : option YjsId :=
 (** The set-based scan. [oLeftId] / [oRightId] / [newId] are the new item's
     origin-left id, origin-right id, and id (matching the Go [idOptEqual] /
     client comparisons). *)
-Fixpoint setfii_loop (count offset : nat) (leftIdx rightIdx : Z)
+Fixpoint set_find_integration_loop (count offset : nat) (leftIdx rightIdx : Z)
     (oLeftId oRightId : option YjsId) (newId : YjsId)
     (arr : list (YjsItem A)) (ibo ci : gset YjsId) (destIdx : Z) : option Z :=
   match count with
@@ -46,12 +46,12 @@ Fixpoint setfii_loop (count offset : nat) (leftIdx rightIdx : Z)
     let ci' := {[cId]} ∪ ci in
     if decide (origin_id (origin other) = oLeftId) then
       if decide (clientId cId < clientId newId)%nat then
-        setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
+        set_find_integration_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
           ibo' ∅ (Z.of_nat (i + 1))
       else if decide (origin_id (rightOrigin other) = oRightId) then
         Some destIdx
       else
-        setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
+        set_find_integration_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
           ibo' ci' destIdx
     else
       match origin_id (origin other) with
@@ -59,10 +59,10 @@ Fixpoint setfii_loop (count offset : nat) (leftIdx rightIdx : Z)
         if decide (col ∈ ibo') then
           (* conflict's left origin was already scanned (case 2) *)
           if decide (col ∉ ci') then
-            setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
+            set_find_integration_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
               ibo' ∅ (Z.of_nat (i + 1))
           else
-            setfii_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
+            set_find_integration_loop count' (S offset) leftIdx rightIdx oLeftId oRightId newId arr
               ibo' ci' destIdx
         else
           (* left origin is before this run: origins would cross, stop (yrs) *)
@@ -73,7 +73,7 @@ Fixpoint setfii_loop (count offset : nat) (leftIdx rightIdx : Z)
 
 Definition setfindIntegratedIndex (leftIdx rightIdx : Z) (input : IntegrateInput (A := A))
     (arr : list (YjsItem A)) : option nat :=
-  d ← setfii_loop (Z.to_nat (rightIdx - leftIdx) - 1) 1 leftIdx rightIdx
+  d ← set_find_integration_loop (Z.to_nat (rightIdx - leftIdx) - 1) 1 leftIdx rightIdx
        (in_originId input) (in_rightOriginId input) (in_id input) arr ∅ ∅ (leftIdx + 1);
   Some (Z.to_nat d).
 
@@ -354,7 +354,7 @@ Qed.
 
     [TODO] the coupling induction. Reuses [no_cross_origin] and the same-origin /
     break facts from insert_loop.v. *)
-Lemma setfii_loop_eq_fii_loop (arr : list (YjsItem A)) (newItem : YjsItem A)
+Lemma set_find_integration_loop_eq_fii_loop (arr : list (YjsItem A)) (newItem : YjsItem A)
     (input : IntegrateInput (A := A)) (leftIdx rightIdx : Z) :
   YjsArrInvariant arr ->
   IsClosedItemSet (ArrSet (newItem :: arr)) ->
@@ -367,7 +367,7 @@ Lemma setfii_loop_eq_fii_loop (arr : list (YjsItem A)) (newItem : YjsItem A)
   forall (count offset : nat) (ibo ci : gset YjsId) (destIdx : Z) (scanning : bool),
     (leftIdx + Z.of_nat offset + Z.of_nat count = rightIdx)%Z ->
     Couple arr newItem leftIdx offset ibo ci destIdx scanning ->
-    setfii_loop count offset leftIdx rightIdx (in_originId input) (in_rightOriginId input)
+    set_find_integration_loop count offset leftIdx rightIdx (in_originId input) (in_rightOriginId input)
       (in_id input) arr ibo ci destIdx
     = fii_loop count offset leftIdx rightIdx (clientId (item_id newItem)) arr scanning destIdx.
 Proof using A EqDA.
@@ -397,7 +397,7 @@ Proof using A EqDA.
     have Honl : origin other <> Last.
     { move=> HL; have [h Hlt] := item_origin_lt other; move: Hlt; rewrite HL => Hlt.
       exact: (not_last_lt_ptr Hclosed Hinv h (itemPtr other) (arrset_mem arr newItem other Hmem) Hlt). }
-    cbn [setfii_loop fii_loop].
+    cbn [set_find_integration_loop fii_loop].
     rewrite /getElemExcept Hother /= HoL HoR /= Hi1 -Hid.
     rewrite -Hid in IH.
     destruct (decide (origin_id (origin other) = in_originId input)) as [Ho|Ho].
@@ -514,7 +514,7 @@ Proof using A EqDA.
     - move=> idz; split; [set_solver | move=> [k [y [Hk1 [Hk2 _]]]]; exfalso; lia].
     - move=> idz; split; [set_solver | move=> [k [y [Hk1 [Hk2 _]]]]; exfalso; lia].
     - done. }
-  have Heq := setfii_loop_eq_fii_loop arr newItem input leftIdx rightIdx
+  have Heq := set_find_integration_loop_eq_fii_loop arr newItem input leftIdx rightIdx
     Harr Hclosed Hinv Hmax Htoitem HfindL HfindR Hl0 Hlr Hrsz
     (Z.to_nat (rightIdx - leftIdx) - 1) 1 ∅ ∅ (leftIdx + 1)%Z false Hcount HCouple.
   rewrite /setfindIntegratedIndex /findIntegratedIndex Heq Hid //.
