@@ -3,7 +3,7 @@
     Port of [LeanYjs/Order/NoCrossOrigin.lean]: if [x < y] then either [y]'s
     origin is at most [x]'s origin, or [x] is at most [y]'s origin -- the two
     cannot "cross". Proved by strong induction on the size sum, using origin
-    reachability/nearest-reachability and the order's transitivity/asymmetry. *)
+    reachability/origin adjacency and the order's transitivity/asymmetry. *)
 From stdpp Require Import base numbers.
 From stdpp Require Import ssreflect.
 From iris.prelude Require Import options.
@@ -54,7 +54,7 @@ Proof.
           - exact: (reachable_right xo (itemPtr y) xid xc).
           - destruct y as [yo yr yid yc]; apply: reachable_single;
               exact: (reachable yo yr yid yc). }
-        case: (origin_nearest_reachable _ inv xo (itemPtr y) xc xid (origin y) Hpx Hreach)
+        case: (origins_adjacent_in_reachable _ inv xo (itemPtr y) xc xid (origin y) Hpx Hreach)
           => [Hle1 | Hle1]; first by left.
         case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle1) => [Heq2 | Hlt2].
         -- exfalso; move: Heq2; have [Hne _] := not_self_origin y; exact: Hne.
@@ -73,7 +73,7 @@ Proof.
              - destruct xr' as [a b c d]; apply: reachable_single;
                  exact: (reachable a b c d). }
            have Hxro : YjsLeq' (origin xr') xo.
-           { case: (origin_nearest_reachable _ inv xo (itemPtr xr') xc xid (origin xr') Hpx Hreach)
+           { case: (origins_adjacent_in_reachable _ inv xo (itemPtr xr') xc xid (origin xr') Hpx Hreach)
                => [Hle3 | Hle3]; first exact: Hle3.
              exfalso; case: (yjs_leq'_imp_eq_or_yjs_lt' _ _ Hle3) => [Heq3 | Hlt3].
              - move: Heq3; have [Hne _] := not_self_origin xr'; exact: Hne.
