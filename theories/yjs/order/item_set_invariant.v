@@ -13,12 +13,13 @@ From yjs.order Require Import item_order.
 (** An item set is a valid insertion history when:
     - every item's origin is strictly before its right origin;
     - any pointer reachable from an item via origins lies outside the
-      [origin, rightOrigin] interval; and
+      [origin, rightOrigin] interval, i.e. an item's origin and right
+      origin are adjacent among the pointers reachable from it; and
     - ids identify items uniquely. *)
 Record ItemSetInvariant {A} (P : ItemSet A) : Prop := {
   origin_not_leq : forall (o r : YjsPtr A) (c : A) (id : YjsId),
     P (Item o r id c) -> YjsLt' o r;
-  origin_nearest_reachable : forall (o r : YjsPtr A) (c : A) (id : YjsId) (x : YjsPtr A),
+  origins_adjacent_in_reachable : forall (o r : YjsPtr A) (c : A) (id : YjsId) (x : YjsPtr A),
     P (Item o r id c) -> OriginReachable (Item o r id c) x ->
     YjsLeq' x o \/ YjsLeq' r x;
   id_unique : forall (x y : YjsItem A),
@@ -132,7 +133,7 @@ Proof.
   - move=> o r c id Hq.
     exact: (origin_not_leq _ HP o r c id (proj2 (Hiff _) Hq)).
   - move=> o r c id x Hq Hreach.
-    exact: (origin_nearest_reachable _ HP o r c id x (proj2 (Hiff _) Hq) Hreach).
+    exact: (origins_adjacent_in_reachable _ HP o r c id x (proj2 (Hiff _) Hq) Hreach).
   - move=> x y Hid Hqx Hqy.
     exact: (id_unique _ HP x y Hid (proj2 (Hiff _) Hqx) (proj2 (Hiff _) Hqy)).
 Qed.

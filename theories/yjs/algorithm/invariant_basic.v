@@ -97,7 +97,7 @@ Proof.
     + exact: (origin_not_leq _ Hinv o r c id Hin).
   - move=> o r c id x; rewrite /ArrSet /= elem_of_cons => -[Heq | Hin] Hreachable.
     + subst item; exact: Hreach.
-    + exact: (origin_nearest_reachable _ Hinv o r c id x Hin Hreachable).
+    + exact: (origins_adjacent_in_reachable _ Hinv o r c id x Hin Hreachable).
   - move=> x y Hid; rewrite /ArrSet /= !elem_of_cons => -[Hx | Hx] -[Hy | Hy].
     + by subst x y.
     + subst x; symmetry; apply: Hsameid; [exact: Hy | by rewrite Hid].
